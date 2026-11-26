@@ -57,8 +57,10 @@ export function decideRoute(policy: Policy, deviceAvailable: boolean): Route {
 export function toIntent(raw: unknown): AiIntent | null {
   let v = raw;
   if (typeof v === "string") {
+    const m = v.match(/\{[\s\S]*\}/); // tolerate code fences or text around the JSON
+    if (!m) return null;
     try {
-      v = JSON.parse(v);
+      v = JSON.parse(m[0]);
     } catch {
       return null;
     }
@@ -89,34 +91,34 @@ export async function understand(said: string, input: Context, engines: Engines)
   if (secret.tripped) return { kind: "secret_spoken", secret: secret.kind ?? "pin", source: "rules" };
 
   let route = decideRoute(ctx.policy, ctx.deviceAvailable);
-  let raw: unknown;
+  let intent: AiIntent | null = null;
   let source: Source = "rules";
   let sentToCloud: string | undefined;
   let cloudContacts: string[] = [];
 
   if (route === "on_device") {
     try {
-      raw = await engines.onDevice(said);
-      source = "on_device";
+      intent = toIntent(await engines.onDevice(said));
     } catch {
-      route = ctx.policy === "on_device_only" ? "none" : "cloud";
+      intent = null;
     }
+    // Unavailable or unusable on-device answer: fall back (cloud with redaction), or rules if on-device only.
+    if (intent) source = "on_device";
+    else route = ctx.policy === "on_device_only" ? "none" : "cloud";
   }
   if (route === "cloud") {
     const r = redactForCloud(said, ctx.contacts.map((c) => c.name));
-    sentToCloud = r.text;
-    cloudContacts = r.contacts;
     try {
-      raw = await engines.cloud(r.text);
+      intent = toIntent(await engines.cloud(r.text));
       source = "cloud";
+      sentToCloud = r.text;
+      cloudContacts = r.contacts;
     } catch {
       route = "none";
-      sentToCloud = undefined;
-      cloudContacts = [];
     }
   }
+  if (route === "none") intent = rulesIntent(said, ctx.contacts);
 
-  const intent = route === "none" ? rulesIntent(said, ctx.contacts) : toIntent(raw);
   const extra = sentToCloud !== undefined ? { sentToCloud } : {};
   if (!intent || intent.action === "unclear") return { kind: "unclear", source, ...extra };
   if (intent.action !== "send") return { kind: "intent", action: intent.action, source, ...extra };

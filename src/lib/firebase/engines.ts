@@ -98,6 +98,11 @@ async function run(model: GenerativeModel, said: string): Promise<unknown> {
 }
 
 export const firebaseEngines: Engines = {
-  onDevice: (said) => run(onDevice(), said),
+  // Honesty guard: only count an answer as on-device if the SDK says it ran on the device.
+  onDevice: async (said) => {
+    const out = await run(onDevice(), said);
+    if (lastCall.source !== InferenceSource.ON_DEVICE) throw new Error("not answered on device");
+    return out;
+  },
   cloud: (said) => run(cloud(), said),
 };

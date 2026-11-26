@@ -93,10 +93,30 @@ describe("understand(): the only path from words to a payment proposal", () => {
     expect(r).toMatchObject({ kind: "rejected", reason: "unknown_payee" });
   });
 
-  it("garbage from the model becomes 'unclear', never a payment", async () => {
-    const e = engines({ onDevice: vi.fn(async () => "not json at all") });
+  it("garbage from both models becomes 'unclear', never a payment", async () => {
+    const e = engines({ onDevice: vi.fn(async () => "not json at all"), cloud: vi.fn(async () => "nope") });
     const r = await understand("send five thousand naira to Mama Ade", { contacts, limitMinor, policy: "on_device_first", deviceAvailable: true }, e);
     expect(r.kind).toBe("unclear");
+  });
+
+  it("unusable on-device output falls back to the cloud, redacted", async () => {
+    const e = engines({ onDevice: vi.fn(async () => "On-device model is not available, echoing input") });
+    const r = await understand("send 5000 to Tunde", { contacts, limitMinor, policy: "on_device_first", deviceAvailable: true }, e);
+    expect(e.cloud).toHaveBeenCalledWith("send [AMOUNT] to [CONTACT_1]");
+    expect(r).toMatchObject({ kind: "proposal", source: "cloud" });
+  });
+
+  it("on_device_only never falls back to the cloud", async () => {
+    const e = engines({ onDevice: vi.fn(async () => "garbage") });
+    const r = await understand("send 5000 to Tunde", { contacts, limitMinor, policy: "on_device_only", deviceAvailable: true }, e);
+    expect(e.cloud).not.toHaveBeenCalled();
+    expect(r.source).toBe("rules");
+  });
+
+  it("accepts JSON wrapped in a code fence", async () => {
+    const e = engines({ onDevice: vi.fn(async () => '```json\n{"action":"send","amountMinor":500000,"payee":"Mama Ade"}\n```') });
+    const r = await understand("send five thousand naira to Mama Ade", { contacts, limitMinor, policy: "on_device_first", deviceAvailable: true }, e);
+    expect(r).toMatchObject({ kind: "proposal", source: "on_device" });
   });
 
   it("a rejected cross-check is reported with its reason", async () => {
