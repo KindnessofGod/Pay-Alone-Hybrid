@@ -10,3 +10,5 @@ out/
 .vercel
 next-env.d.ts
 *.tsbuildinfo
+firestore-debug.log
+*-debug.log
