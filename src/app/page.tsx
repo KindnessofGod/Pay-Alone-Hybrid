@@ -44,6 +44,7 @@ export default function Home() {
   const [ms, setMs] = useState(0);
   const [approving, setApproving] = useState<{ payeeId: string; amountMinor: string; key: number } | null>(null);
   const busy = useRef(false);
+  const seq = useRef(0); // only the newest request may change the screen
 
   const speak = useCallback(async (t: string) => {
     setSpoken(t);
@@ -84,8 +85,11 @@ export default function Home() {
   const handle = useCallback(
     async (said: string, now?: Settings) => {
       setHeard(said);
+      setApproving(null);
       const c = now ?? { policy, limitMinor, nano };
+      const my = ++seq.current;
       const r = await understand(said, { contacts: CONTACTS, limitMinor: c.limitMinor, policy: c.policy, deviceAvailable: c.nano === "available" }, firebaseEngines);
+      if (my !== seq.current) return; // a newer request started while this one ran
       setMs(lastCall.ms);
       if (r.kind === "secret_spoken") {
         setHeard("(deleted)");

@@ -7,6 +7,7 @@
 import { getGenerativeModel, InferenceMode, InferenceSource, Schema, type GenerativeModel } from "firebase/ai";
 import { firebaseAI } from "./client";
 import type { Engines } from "../hybrid/understand";
+import { oneAtATime } from "../hybrid/serial";
 
 export const CLOUD_MODEL = "gemini-3.5-flash-lite";
 
@@ -97,12 +98,15 @@ async function run(model: GenerativeModel, said: string): Promise<unknown> {
   return result.response.text();
 }
 
-export const firebaseEngines: Engines = {
+// One on-device call at a time: the SDK destroys the previous Chrome session when it starts a new one.
+const onDeviceOnce = oneAtATime(async (said: string) => {
+  const out = await run(onDevice(), said);
   // Honesty guard: only count an answer as on-device if the SDK says it ran on the device.
-  onDevice: async (said) => {
-    const out = await run(onDevice(), said);
-    if (lastCall.source !== InferenceSource.ON_DEVICE) throw new Error("not answered on device");
-    return out;
-  },
+  if (lastCall.source !== InferenceSource.ON_DEVICE) throw new Error("not answered on device");
+  return out;
+});
+
+export const firebaseEngines: Engines = {
+  onDevice: onDeviceOnce,
   cloud: (said) => run(cloud(), said),
 };
