@@ -1,25 +1,22 @@
 // Wires the payment flow to the real store and sign-in check. Server side only.
-import { getAuth } from "firebase-admin/auth";
 import { DEMO_CONTACTS } from "../demo/contacts";
 import { randomToken } from "../secret";
 import { getStore, storeKind } from "../store";
-import { adminApp } from "./admin";
 import type { Verify, VerifyAppCheck } from "./http";
 import type { PayDeps } from "./payflow";
+import { verifyAppCheckToken, verifyFirebaseIdToken } from "./tokens";
 
 export const serverReady = () => storeKind() !== "none";
 
-// checkRevoked: a signed-out or revoked token stops working at once.
-export const verifyUser: Verify = async (idToken) => (await getAuth(adminApp()).verifyIdToken(idToken, true)).uid;
+// Revocation is not checked; tokens live up to 1 hour.
+export const verifyUser: Verify = (idToken) => verifyFirebaseIdToken(idToken);
 
 /** On when APPCHECK_ENFORCE=1 (set once the reCAPTCHA key is registered). */
 export function appCheckGate(): VerifyAppCheck | undefined {
   if (process.env.APPCHECK_ENFORCE !== "1") return undefined;
   return async (token) => {
     if (!token) throw new Error("no App Check token");
-    // Loaded only when enforcing: its key-fetching dependency fails to load on Vercel's runtime otherwise.
-    const { getAppCheck } = await import("firebase-admin/app-check");
-    await getAppCheck(adminApp()).verifyToken(token);
+    await verifyAppCheckToken(token);
   };
 }
 
