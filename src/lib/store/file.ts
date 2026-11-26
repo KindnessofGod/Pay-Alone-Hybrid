@@ -64,6 +64,17 @@ export class FileStore implements Store {
     });
   }
 
+  update<T, R>(collection: string, id: string, fn: (cur: T | null) => { doc: T | null; result: R }): Promise<R> {
+    return this.serial(async () => {
+      const data = await this.read();
+      const { doc, result } = fn((data[collection]?.[id] as T | undefined) ?? null);
+      if (doc === null) delete (data[collection] ??= {})[id];
+      else (data[collection] ??= {})[id] = doc;
+      await this.write(data);
+      return result;
+    });
+  }
+
   list<T>(collection: string): Promise<T[]> {
     return this.serial(async () => Object.values((await this.read())[collection] ?? {}) as T[]);
   }

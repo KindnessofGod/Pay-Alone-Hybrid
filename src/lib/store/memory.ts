@@ -23,6 +23,13 @@ export class MemoryStore implements Store {
     this.col(c).delete(id);
     return v === undefined ? null : (v as T);
   }
+  async update<T, R>(c: string, id: string, fn: (cur: T | null) => { doc: T | null; result: R }) {
+    const cur = this.col(c).get(id);
+    const { doc, result } = fn(cur === undefined ? null : (structuredClone(cur) as T));
+    if (doc === null) this.col(c).delete(id);
+    else this.col(c).set(id, structuredClone(doc));
+    return result;
+  }
   async list<T>(c: string) {
     return [...this.col(c).values()].map((v) => structuredClone(v) as T);
   }

@@ -147,3 +147,44 @@ describe("payment flow on the server", () => {
     expect(JSON.stringify((d.store as MemoryStore).dump())).not.toContain("4826");
   });
 });
+
+describe("parallel attacks (review 27 Nov)", () => {
+  it("twenty wrong PINs sent at the same moment still lock the account", async () => {
+    const d = await ready();
+    const starts = await Promise.all(Array.from({ length: 20 }, () => startPayment(d, "u1", { payeeId: "c1", amountMinor: "500" })));
+    const guesses = starts.map((s, i) => {
+      if (!s.ok) throw new Error("start failed");
+      return finishPayment(d, "u1", { requestId: s.requestId, proof: { method: "pin", challenge: s.challenge, pin: String(7000 + i * 13) } });
+    });
+    const results = await Promise.all(guesses);
+    expect(results.filter((r) => !r.ok && r.reason === "wrong").length).toBeLessThanOrEqual(4);
+    const s = await startPayment(d, "u1", { payeeId: "c1", amountMinor: "500" });
+    if (!s.ok) throw new Error("start failed");
+    const right = await finishPayment(d, "u1", { requestId: s.requestId, proof: { method: "pin", challenge: s.challenge, pin: "4826" } });
+    expect(right).toMatchObject({ ok: false, reason: "locked" });
+  });
+
+  it("a PIN check running at the same time as a PIN change cannot undo the change", async () => {
+    const d = await ready();
+    const s = await startPayment(d, "u1", { payeeId: "c1", amountMinor: "500" });
+    if (!s.ok) throw new Error("start failed");
+    await Promise.all([
+      finishPayment(d, "u1", { requestId: s.requestId, proof: { method: "pin", challenge: s.challenge, pin: "9173" } }),
+      setUserPin(d, "u1", { pin: "7391", oldPin: "4826" }),
+    ]);
+    const s2 = await startPayment(d, "u1", { payeeId: "c1", amountMinor: "500" });
+    if (!s2.ok) throw new Error("start failed");
+    const r = await finishPayment(d, "u1", { requestId: s2.requestId, proof: { method: "pin", challenge: s2.challenge, pin: "7391" } });
+    expect(r.ok).toBe(true);
+  });
+
+  it("an expired pending payment cannot be approved", async () => {
+    let now = Date.now();
+    const d = await ready(deps({ now: () => now }));
+    const s = await startPayment(d, "u1", { payeeId: "c1", amountMinor: "500" });
+    if (!s.ok) throw new Error("start failed");
+    now += 11 * 60_000;
+    const f = await finishPayment(d, "u1", { requestId: s.requestId, proof: { method: "pin", challenge: s.challenge, pin: "4826" } });
+    expect(f).toMatchObject({ ok: false, reason: "not_found" });
+  });
+});

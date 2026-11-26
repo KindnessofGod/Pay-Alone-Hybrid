@@ -43,3 +43,20 @@ describe("API wrapper", () => {
     expect(res.headers.get("cache-control")).toBe("no-store");
   });
 });
+
+describe("App Check on the API (rule 14)", () => {
+  const appCheck = async (t: string) => {
+    if (t !== "good-app") throw new Error("bad app");
+  };
+  it("refuses a call without a valid App Check token when App Check is on", async () => {
+    for (const h of [{ authorization: "Bearer good-token" }, { authorization: "Bearer good-token", "x-firebase-appcheck": "forged" }] as Record<string, string>[]) {
+      const res = await handle(req(h), verify, async () => ({}), appCheck);
+      expect(res.status).toBe(401);
+      expect(await res.json()).toMatchObject({ reason: "app_check" });
+    }
+  });
+  it("accepts a valid App Check token", async () => {
+    const res = await handle(req({ authorization: "Bearer good-token", "x-firebase-appcheck": "good-app" }), verify, async () => ({ fine: true }), appCheck);
+    expect(res.status).toBe(200);
+  });
+});

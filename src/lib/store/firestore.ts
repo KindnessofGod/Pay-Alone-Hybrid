@@ -31,6 +31,17 @@ export class FirestoreStore implements Store {
       return s.data() as T;
     });
   }
+  async update<T, R>(collection: string, id: string, fn: (cur: T | null) => { doc: T | null; result: R }): Promise<R> {
+    const ref = this.db.collection(collection).doc(docId(id));
+    return this.db.runTransaction(async (tx) => {
+      const s = await tx.get(ref);
+      const { doc, result } = fn(s.exists ? (s.data() as T) : null);
+      if (doc === null) {
+        if (s.exists) tx.delete(ref);
+      } else tx.set(ref, JSON.parse(JSON.stringify(doc)));
+      return result;
+    });
+  }
   async list<T>(collection: string): Promise<T[]> {
     return (await this.db.collection(collection).get()).docs.map((d) => d.data() as T);
   }

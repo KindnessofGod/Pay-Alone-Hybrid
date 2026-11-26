@@ -6,6 +6,12 @@ function memoryStore(): PinStore {
   return {
     get: async <T,>(id: string) => (m.get(id) as T) ?? null,
     put: async <T,>(id: string, v: T) => void m.set(id, v),
+    update: async <T, R>(id: string, fn: (cur: T | null) => { doc: T | null; result: R }) => {
+      const { doc, result } = fn((m.get(id) as T) ?? null);
+      if (doc === null) m.delete(id);
+      else m.set(id, doc);
+      return result;
+    },
   };
 }
 

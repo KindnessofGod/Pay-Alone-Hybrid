@@ -9,7 +9,16 @@ beforeAll(() => {
 
 function memPins(): PinStore {
   const m = new Map<string, unknown>();
-  return { get: async <T,>(id: string) => (m.get(id) as T) ?? null, put: async (id, rec) => void m.set(id, rec) };
+  return {
+    get: async <T,>(id: string) => (m.get(id) as T) ?? null,
+    put: async (id, rec) => void m.set(id, rec),
+    update: async <T, R>(id: string, fn: (cur: T | null) => { doc: T | null; result: R }) => {
+      const { doc, result } = fn((m.get(id) as T) ?? null);
+      if (doc === null) m.delete(id);
+      else m.set(id, doc);
+      return result;
+    },
+  };
 }
 
 const subject = { requestId: "r1", quoteId: "q1", debitValue: "205000", assetCode: "NGN", assetScale: 2 };

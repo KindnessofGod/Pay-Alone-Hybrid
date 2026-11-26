@@ -10,6 +10,11 @@ export interface Store {
   delete(collection: string, id: string): Promise<void>;
   /** Get a document and delete it in one step. Two takes of the same document: only one gets it. */
   take<T>(collection: string, id: string): Promise<T | null>;
+  /**
+   * Read, change and write one document as one step, so two updates at the same moment cannot both
+   * start from the same old value. fn must not have side effects: Firestore may run it more than once.
+   */
+  update<T, R>(collection: string, id: string, fn: (cur: T | null) => { doc: T | null; result: R }): Promise<R>;
   list<T>(collection: string): Promise<T[]>;
 }
 

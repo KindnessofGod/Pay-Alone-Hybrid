@@ -19,6 +19,11 @@ describe("FirestoreStore (emulator)", () => {
     expect(r.filter(Boolean)).toEqual([{ n: 2 }]);
     expect(await s.get(c, "b")).toBeNull();
   });
+  it("update counts every one of ten changes sent at the same moment", async () => {
+    await s.put(c, "n", { count: 0 });
+    await Promise.all(Array.from({ length: 10 }, () => s.update<{ count: number }, void>(c, "n", (cur) => ({ doc: { count: (cur?.count ?? 0) + 1 }, result: undefined }))));
+    expect(await s.get(c, "n")).toEqual({ count: 10 });
+  });
   it("ids with slashes cannot reach another collection", async () => {
     await s.put(c, "x/y", { n: 3 });
     expect(await s.get(c, "x/y")).toEqual({ n: 3 });

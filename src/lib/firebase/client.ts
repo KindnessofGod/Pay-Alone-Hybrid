@@ -2,13 +2,14 @@
 // Config comes from NEXT_PUBLIC_* build variables, never from the repo.
 "use client";
 import { getApps, initializeApp, type FirebaseApp } from "firebase/app";
-import { initializeAppCheck, ReCaptchaEnterpriseProvider, ReCaptchaV3Provider } from "firebase/app-check";
+import { getToken, initializeAppCheck, ReCaptchaEnterpriseProvider, ReCaptchaV3Provider, type AppCheck } from "firebase/app-check";
 import { getAI, GoogleAIBackend, type AI } from "firebase/ai";
 import { fetchAndActivate, getRemoteConfig, getValue } from "firebase/remote-config";
 import type { Policy } from "../hybrid/understand";
 
 let app: FirebaseApp | undefined;
 let ai: AI | undefined;
+let appCheck: AppCheck | undefined;
 
 export function firebaseConfigured(): boolean {
   return Boolean(process.env.NEXT_PUBLIC_FIREBASE_API_KEY && process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID);
@@ -32,7 +33,7 @@ export function firebaseApp(): FirebaseApp {
   const siteKey = process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY;
   if (siteKey) {
     const provider = process.env.NEXT_PUBLIC_RECAPTCHA_ENTERPRISE === "1" ? new ReCaptchaEnterpriseProvider(siteKey) : new ReCaptchaV3Provider(siteKey);
-    initializeAppCheck(app, { provider, isTokenAutoRefreshEnabled: true });
+    appCheck = initializeAppCheck(app, { provider, isTokenAutoRefreshEnabled: true });
   }
   return app;
 }
@@ -72,7 +73,11 @@ export async function api<T = Record<string, unknown>>(path: string, body: unkno
   const user = auth.currentUser ?? (await signInAnonymously(auth)).user;
   const res = await fetch(path, {
     method: "POST",
-    headers: { "content-type": "application/json", authorization: `Bearer ${await user.getIdToken()}` },
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${await user.getIdToken()}`,
+      ...(appCheck ? { "x-firebase-appcheck": (await getToken(appCheck).catch(() => ({ token: "" }))).token } : {}),
+    },
     body: JSON.stringify(body),
   });
   try {

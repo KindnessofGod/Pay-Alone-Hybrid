@@ -57,10 +57,13 @@ export interface Receipt {
   createdAt: string;
 }
 
+/** A pending payment older than this cannot be approved; the person starts again. */
+export const PENDING_TTL_MS = 10 * 60_000;
+
 const pendingKey = (userId: string, requestId: string) => `${userId}|${requestId}`;
 
 export function pinStoreOf(store: Store): PinStore {
-  return { get: (id) => store.get("pins", id), put: (id, rec) => store.put("pins", id, rec) };
+  return { get: (id) => store.get("pins", id), put: (id, rec) => store.put("pins", id, rec), update: (id, fn) => store.update("pins", id, fn) };
 }
 
 export function challengeStoreOf(store: Store): ChallengeStore {
@@ -121,6 +124,10 @@ export async function finishPayment(
   const key = pendingKey(userId, body.requestId);
   const pending = await d.store.get<Pending>("pending", key);
   if (!pending || pending.userId !== userId) return { ok: false, reason: "not_found" };
+  if ((d.now?.() ?? Date.now()) - pending.createdAt > PENDING_TTL_MS) {
+    await cancelPayment(d, userId, { requestId: body.requestId });
+    return { ok: false, reason: "not_found" };
+  }
 
   const a = await approvePayment({
     userId,
