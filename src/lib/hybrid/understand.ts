@@ -31,12 +31,24 @@ export interface Context {
   deviceAvailable: boolean;
 }
 
-export type Understood =
+/** Why a path was not used, for the screen: "on-device: ..." or "online: ...". Never holds the sentence. */
+type Skips = { skipped?: string[] };
+
+export type Understood = Skips &
+  (
   | { kind: "secret_spoken"; secret: SecretKind; source: "rules" }
   | { kind: "proposal"; proposal: Proposal; needsApproval: true; source: Source; sentToCloud?: string }
   | { kind: "rejected"; reason: Exclude<CheckReason, "not_send">; source: Source; sentToCloud?: string }
   | { kind: "intent"; action: string; source: Source; sentToCloud?: string }
-  | { kind: "unclear"; source: Source; sentToCloud?: string };
+  | { kind: "unclear"; source: Source; sentToCloud?: string }
+  );
+
+/** An error message with the person's words and any digits blanked, cut short. */
+function reason(e: unknown, said: string): string {
+  let m = (e instanceof Error ? `${e.name === "Error" ? "" : e.name + ": "}${e.message}` : String(e)).slice(0, 160);
+  for (const w of said.split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 3)) m = m.replace(new RegExp(`\\b${w}\\b`, "giu"), "…");
+  return m.replace(/\p{Nd}+/gu, "#");
+}
 
 const ACTIONS = ["send", "balance", "history", "repeat", "cancel", "help", "unclear"];
 
@@ -95,12 +107,16 @@ export async function understand(said: string, input: Context, engines: Engines)
   let source: Source = "rules";
   let sentToCloud: string | undefined;
   let cloudContacts: string[] = [];
+  const skipped: string[] = [];
+  if ((ctx.policy === "on_device_first" || ctx.policy === "on_device_only") && !ctx.deviceAvailable) skipped.push("on-device: Gemini Nano not available on this computer");
 
   if (route === "on_device") {
     try {
       intent = toIntent(await engines.onDevice(said));
-    } catch {
+      if (!intent) skipped.push("on-device: answer was not usable JSON");
+    } catch (e) {
       intent = null;
+      skipped.push(`on-device: ${reason(e, said)}`);
     }
     // Unavailable or unusable on-device answer: fall back (cloud with redaction), or rules if on-device only.
     if (intent) source = "on_device";
@@ -113,13 +129,14 @@ export async function understand(said: string, input: Context, engines: Engines)
       source = "cloud";
       sentToCloud = r.text;
       cloudContacts = r.contacts;
-    } catch {
+    } catch (e) {
+      skipped.push(`online: ${reason(e, said)}`);
       route = "none";
     }
   }
   if (route === "none") intent = rulesIntent(said, ctx.contacts);
 
-  const extra = sentToCloud !== undefined ? { sentToCloud } : {};
+  const extra = { ...(sentToCloud !== undefined ? { sentToCloud } : {}), ...(skipped.length ? { skipped } : {}) };
   if (!intent || intent.action === "unclear") return { kind: "unclear", source, ...extra };
   if (intent.action !== "send") return { kind: "intent", action: intent.action, source, ...extra };
 

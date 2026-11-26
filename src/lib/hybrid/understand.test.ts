@@ -125,3 +125,35 @@ describe("understand(): the only path from words to a payment proposal", () => {
     expect(r).toMatchObject({ kind: "rejected", reason: "amount_mismatch", source: "on_device" });
   });
 });
+
+describe("why a path was skipped is reported (no secrets in it)", () => {
+  it("on-device error and cloud error are both reported when plain rules answer", async () => {
+    const e = engines({
+      onDevice: vi.fn(async () => { throw new Error("NotSupportedError: schema not supported"); }),
+      cloud: vi.fn(async () => { throw new Error("Firebase App Check token is invalid."); }),
+    });
+    const r = await understand("send 5000 naira to Tunde", { contacts, limitMinor, policy: "on_device_first", deviceAvailable: true }, e);
+    expect(r.source).toBe("rules");
+    expect(r.skipped).toEqual(["on-device: NotSupportedError: schema not supported", "online: Firebase App Check token is invalid."]);
+  });
+  it("an unusable on-device answer is reported", async () => {
+    const e = engines({ onDevice: vi.fn(async () => "I am not sure") });
+    const r = await understand("send 5000 naira to Tunde", { contacts, limitMinor, policy: "on_device_first", deviceAvailable: true }, e);
+    expect(r.source).toBe("cloud");
+    expect(r.skipped).toEqual(["on-device: answer was not usable JSON"]);
+  });
+  it("when on-device is not available, that is the reason", async () => {
+    const r = await understand("send 5000 naira to Tunde", { contacts, limitMinor, policy: "on_device_first", deviceAvailable: false }, engines());
+    expect(r.skipped).toEqual(["on-device: Gemini Nano not available on this computer"]);
+  });
+  it("nothing skipped when on-device answers", async () => {
+    const r = await understand("send 5000 naira to Tunde", { contacts, limitMinor, policy: "on_device_first", deviceAvailable: true }, engines());
+    expect(r.source).toBe("on_device");
+    expect(r.skipped ?? []).toEqual([]);
+  });
+  it("a reason never carries the sentence (it could hold a name or amount)", async () => {
+    const e = engines({ onDevice: vi.fn(async () => { throw new Error("bad input: send 5000 naira to Tunde"); }) });
+    const r = await understand("send 5000 naira to Tunde", { contacts, limitMinor, policy: "on_device_first", deviceAvailable: true }, e);
+    expect(JSON.stringify(r.skipped)).not.toMatch(/Tunde|5000/);
+  });
+});

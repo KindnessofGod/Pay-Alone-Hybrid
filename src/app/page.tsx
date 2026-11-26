@@ -161,6 +161,11 @@ export default function Home() {
             {"sentToCloud" in result && result.sentToCloud !== undefined && (
               <p className="status">What the cloud received: <code>{result.sentToCloud}</code></p>
             )}
+            {result.skipped?.map((w) => (
+              <p className="status" key={w}>
+                Skipped {w}
+              </p>
+            ))}
             {ms > 0 && result.kind !== "secret_spoken" && result.source !== "rules" && <p className="status">Model time: {ms} ms</p>}
             {!approving && <p>{spoken}</p>}
           </div>
