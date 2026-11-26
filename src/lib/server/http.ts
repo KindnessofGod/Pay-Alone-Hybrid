@@ -43,7 +43,9 @@ export async function handle(
   try {
     return json(200, await fn(userId, body));
   } catch (e) {
-    console.error("api error", e instanceof Error ? e.name : "unknown");
+    // Only our own setup errors are logged in full; they describe configuration, never a request.
+    const setup = e instanceof Error && e.message.startsWith("FIREBASE_SERVICE_ACCOUNT") ? e.message : "";
+    console.error("api error", e instanceof Error ? e.name : "unknown", setup);
     return json(500, { ok: false, reason: "server_error" });
   }
 }
