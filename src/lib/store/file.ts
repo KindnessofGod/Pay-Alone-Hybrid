@@ -52,6 +52,18 @@ export class FileStore implements Store {
     });
   }
 
+  take<T>(collection: string, id: string): Promise<T | null> {
+    return this.serial(async () => {
+      const data = await this.read();
+      const doc = (data[collection]?.[id] as T | undefined) ?? null;
+      if (doc !== null) {
+        delete data[collection][id];
+        await this.write(data);
+      }
+      return doc;
+    });
+  }
+
   list<T>(collection: string): Promise<T[]> {
     return this.serial(async () => Object.values((await this.read())[collection] ?? {}) as T[]);
   }

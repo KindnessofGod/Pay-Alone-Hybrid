@@ -7,6 +7,8 @@ export interface Store {
   get<T>(collection: string, id: string): Promise<T | null>;
   put<T>(collection: string, id: string, doc: T): Promise<void>;
   delete(collection: string, id: string): Promise<void>;
+  /** Get a document and delete it in one step. Two takes of the same document: only one gets it. */
+  take<T>(collection: string, id: string): Promise<T | null>;
   list<T>(collection: string): Promise<T[]>;
 }
 
