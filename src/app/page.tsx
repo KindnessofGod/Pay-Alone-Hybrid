@@ -1,0 +1,164 @@
+"use client";
+// The voice screen. One big button. Everything is also spoken, and works with a screen reader and
+// with the keyboard only (Space to talk).
+import { useCallback, useEffect, useRef, useState } from "react";
+import { understand, type Policy, type Understood } from "@/lib/hybrid/understand";
+import { readBack } from "@/lib/hybrid/readback";
+import type { Contact } from "@/lib/hybrid/crosscheck";
+import { nanoAvailability } from "@/lib/hybrid/device";
+import { installLocalSpeech, listenOnce, localSpeechStatus, say } from "@/lib/hybrid/listen";
+import { firebaseConfigured, remoteSettings } from "@/lib/firebase/client";
+import { firebaseEngines, lastCall, prepareOnDevice } from "@/lib/firebase/engines";
+
+// SIMULATED test contacts until the saved-contacts screen exists.
+const CONTACTS: Contact[] = [
+  { id: "c1", name: "Mama Ade" },
+  { id: "c2", name: "Tunde" },
+  { id: "c3", name: "Chidi Okafor" },
+];
+
+const REASONS: Record<string, string> = {
+  unknown_payee: "I don't know that person. I can only send to people saved in your list.",
+  payee_not_said: "Please say the full name of the person.",
+  no_amount: "Please say how much to send.",
+  amount_mismatch: "I heard two different amounts, so I stopped. Please say it again.",
+  over_limit: "That is more than your spending limit.",
+};
+
+const SOURCE_LABEL: Record<string, string> = {
+  on_device: "Understood on this computer (Gemini Nano)",
+  cloud: "Understood online (Gemini) - no names or amounts sent",
+  rules: "Understood by plain rules (no AI)",
+};
+
+export default function Home() {
+  const [ready, setReady] = useState(false);
+  const [nano, setNano] = useState("checking");
+  const [speech, setSpeech] = useState("checking");
+  const [policy, setPolicy] = useState<Policy>("on_device_first");
+  const [limitMinor, setLimitMinor] = useState("5000000");
+  const [listening, setListening] = useState(false);
+  const [heard, setHeard] = useState("");
+  const [typed, setTyped] = useState("");
+  const [result, setResult] = useState<Understood | null>(null);
+  const [spoken, setSpoken] = useState("");
+  const [ms, setMs] = useState(0);
+  const busy = useRef(false);
+
+  const speak = useCallback(async (t: string) => {
+    setSpoken(t);
+    await say(t);
+  }, []);
+
+  async function start() {
+    const configured = firebaseConfigured();
+    if (configured) {
+      const s = await remoteSettings();
+      setPolicy(s.policy);
+      setLimitMinor(s.limitMinor);
+      setNano("preparing");
+      await prepareOnDevice((p) => setNano(`downloading ${Math.round(p * 100)}%`));
+    }
+    setNano(await nanoAvailability());
+    let sp = await localSpeechStatus();
+    if (sp === "installable") sp = (await installLocalSpeech()) ? "local" : "server";
+    setSpeech(sp);
+    setReady(true);
+    await speak("Pay Alone is ready. Press the big button or the space bar, then say who to pay and how much.");
+  }
+
+  const handle = useCallback(
+    async (said: string) => {
+      setHeard(said);
+      const r = await understand(said, { contacts: CONTACTS, limitMinor, policy, deviceAvailable: nano === "available" }, firebaseEngines);
+      setMs(lastCall.ms);
+      if (r.kind === "secret_spoken") {
+        setHeard("(deleted)");
+        setResult(r);
+        await speak("Stop. Never say your PIN or card number out loud. I have deleted what you said.");
+        return;
+      }
+      setResult(r);
+      if (r.kind === "proposal") await speak(readBack(r.proposal));
+      else if (r.kind === "rejected") await speak(REASONS[r.reason] ?? "I could not do that.");
+      else if (r.kind === "intent") await speak(`You asked about ${r.action}. That part is coming soon.`);
+      else await speak("Sorry, I did not understand. Say who to pay and how much.");
+    },
+    [limitMinor, policy, nano, speak],
+  );
+
+  const talk = useCallback(async () => {
+    if (busy.current) return;
+    busy.current = true;
+    setListening(true);
+    try {
+      const said = await listenOnce({ local: speech === "local" });
+      setListening(false);
+      if (said) await handle(said);
+      else await speak("I did not hear anything. Try again.");
+    } catch {
+      setListening(false);
+      await speak("The microphone did not work. You can type instead.");
+    } finally {
+      busy.current = false;
+    }
+  }, [handle, speak, speech]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code === "Space" && ready && document.activeElement?.tagName !== "INPUT") {
+        e.preventDefault();
+        void talk();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [ready, talk]);
+
+  return (
+    <main>
+      <h1>Pay Alone</h1>
+      <p className="tag">Speak it. Approve it. The AI is never allowed to move your money.</p>
+
+      {!ready ? (
+        <button className="big" onClick={start}>
+          Start
+        </button>
+      ) : (
+        <button className="big" aria-pressed={listening} onClick={talk}>
+          {listening ? "Listening..." : "Press to speak (or Space)"}
+        </button>
+      )}
+
+      <div className="row">
+        <input aria-label="Or type what you want to do" placeholder="Or type: send 5000 naira to Mama Ade" value={typed} onChange={(e) => setTyped(e.target.value)} onKeyDown={(e) => e.key === "Enter" && typed && void handle(typed)} />
+        <button onClick={() => typed && void handle(typed)}>Go</button>
+      </div>
+
+      <div aria-live="polite">
+        {result && (
+          <div className="card">
+            <p className="status">You said: <b>{heard}</b></p>
+            {result.kind === "secret_spoken" ? (
+              <span className="badge bad">PIN stopped before any AI saw it</span>
+            ) : (
+              <span className={`badge ${result.source}`}>{SOURCE_LABEL[result.source]}</span>
+            )}
+            {"sentToCloud" in result && result.sentToCloud !== undefined && (
+              <p className="status">What the cloud received: <code>{result.sentToCloud}</code></p>
+            )}
+            {ms > 0 && result.kind !== "secret_spoken" && result.source !== "rules" && <p className="status">Model time: {ms} ms</p>}
+            <p>{spoken}</p>
+            {result.kind === "proposal" && <p className="sim">Approval with fingerprint or PIN is the next step (being built).</p>}
+          </div>
+        )}
+      </div>
+
+      <p className="status">
+        Gemini Nano: <b>{nano}</b> · Speech recognition: <b>{speech === "local" ? "on this computer" : speech === "server" ? "Google servers" : speech}</b> · Policy: <b>{policy}</b>
+        {!firebaseConfigured() && <> · <b>Firebase not configured: plain rules only</b></>}
+      </p>
+      <p className="sim">Test contacts (simulated): Mama Ade, Tunde, Chidi Okafor. Test money only.</p>
+    </main>
+  );
+}

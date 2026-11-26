@@ -1,0 +1,23 @@
+:root { --bg: #0b0d10; --fg: #f5f7fa; --muted: #aab3bf; --accent: #ffd84d; --ok: #4ade80; --cloud: #7dd3fc; --bad: #fca5a5; --card: #161a20; }
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--fg); font: 20px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { max-width: 720px; margin: 0 auto; padding: 24px 16px 64px; }
+h1 { font-size: 2rem; margin: 0 0 4px; }
+p.tag { color: var(--muted); margin: 0 0 24px; }
+button { font: inherit; border: 0; border-radius: 16px; cursor: pointer; }
+button:focus-visible, input:focus-visible { outline: 4px solid var(--accent); outline-offset: 3px; }
+.big { display: block; width: 100%; min-height: 120px; font-size: 1.6rem; font-weight: 700; background: var(--accent); color: #111; margin: 16px 0; }
+.big[aria-pressed="true"] { background: var(--ok); }
+.row { display: flex; gap: 8px; }
+.row input { flex: 1; font: inherit; padding: 14px; border-radius: 12px; border: 2px solid #333; background: var(--card); color: var(--fg); }
+.row button { padding: 0 20px; background: #2b313a; color: var(--fg); }
+.card { background: var(--card); border-radius: 16px; padding: 16px; margin: 16px 0; }
+.badge { display: inline-block; padding: 6px 12px; border-radius: 999px; font-weight: 700; font-size: 0.9rem; }
+.badge.on_device { background: var(--ok); color: #052e16; }
+.badge.cloud { background: var(--cloud); color: #082f49; }
+.badge.rules { background: #e5e7eb; color: #111; }
+.badge.bad { background: var(--bad); color: #450a0a; }
+.status { color: var(--muted); font-size: 0.85rem; }
+.status b { color: var(--fg); }
+code { background: #000; padding: 2px 6px; border-radius: 6px; font-size: 0.85rem; }
+.sim { color: var(--accent); font-size: 0.8rem; }
