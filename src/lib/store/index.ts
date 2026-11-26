@@ -1,7 +1,8 @@
 // Small document store. Everything the server remembers goes through this interface.
-// Local runs use a JSON file. The deployed app will use Firestore (Admin SDK) behind the same interface.
+// Local runs use a JSON file. The deployed app uses Firestore (Admin SDK) behind the same interface.
 // Ported from our earlier Pay Alone prototype (see DISCLOSURES.md); the Postgres store was dropped.
 import { FileStore } from "./file";
+import { FirestoreStore } from "./firestore";
 
 export interface Store {
   get<T>(collection: string, id: string): Promise<T | null>;
@@ -14,7 +15,17 @@ export interface Store {
 
 let store: Store | undefined;
 
+type Env = Record<string, string | undefined>;
+
+export function storeKind(env: Env = process.env): "firestore" | "file" | "none" {
+  if (env.FIREBASE_SERVICE_ACCOUNT || env.FIRESTORE_EMULATOR_HOST) return "firestore";
+  return env.VERCEL ? "none" : "file";
+}
+
 export function getStore(): Store {
-  if (!store) store = new FileStore();
+  if (store) return store;
+  const kind = storeKind();
+  if (kind === "none") throw new Error("No database: set FIREBASE_SERVICE_ACCOUNT in Vercel.");
+  store = kind === "firestore" ? new FirestoreStore() : new FileStore();
   return store;
 }
