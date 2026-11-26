@@ -2,7 +2,7 @@
 // Config comes from NEXT_PUBLIC_* build variables, never from the repo.
 "use client";
 import { getApps, initializeApp, type FirebaseApp } from "firebase/app";
-import { initializeAppCheck, ReCaptchaV3Provider } from "firebase/app-check";
+import { initializeAppCheck, ReCaptchaEnterpriseProvider, ReCaptchaV3Provider } from "firebase/app-check";
 import { getAI, GoogleAIBackend, type AI } from "firebase/ai";
 import { fetchAndActivate, getRemoteConfig, getValue } from "firebase/remote-config";
 import type { Policy } from "../hybrid/understand";
@@ -30,7 +30,10 @@ export function firebaseApp(): FirebaseApp {
     (self as unknown as { FIREBASE_APPCHECK_DEBUG_TOKEN: boolean }).FIREBASE_APPCHECK_DEBUG_TOKEN = true;
   }
   const siteKey = process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY;
-  if (siteKey) initializeAppCheck(app, { provider: new ReCaptchaV3Provider(siteKey), isTokenAutoRefreshEnabled: true });
+  if (siteKey) {
+    const provider = process.env.NEXT_PUBLIC_RECAPTCHA_ENTERPRISE === "1" ? new ReCaptchaEnterpriseProvider(siteKey) : new ReCaptchaV3Provider(siteKey);
+    initializeAppCheck(app, { provider, isTokenAutoRefreshEnabled: true });
+  }
   return app;
 }
 
