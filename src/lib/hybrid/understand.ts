@@ -45,7 +45,7 @@ export type Understood = Skips &
 
 /** An error message with the person's words and any digits blanked, cut short. */
 function reason(e: unknown, said: string): string {
-  let m = (e instanceof Error ? `${e.name === "Error" ? "" : e.name + ": "}${e.message}` : String(e)).slice(0, 160);
+  let m = (e instanceof Error ? `${e.name === "Error" ? "" : e.name + ": "}${e.message}` : String(e)).replace(/https?:\/\/\S+?(?=: |\s|$)/g, "(link)").slice(0, 200);
   for (const w of said.split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 3)) m = m.replace(new RegExp(`\\b${w}\\b`, "giu"), "…");
   return m.replace(/\p{Nd}+/gu, "#");
 }

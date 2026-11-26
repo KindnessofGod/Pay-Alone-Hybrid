@@ -36,13 +36,22 @@ export default function Approve({ payeeId, amountMinor, speak, listen, onClose }
   const req = useRef<{ requestId: string; challenge: string } | null>(null);
   const started = useRef(false);
 
+  // Any network or sign-in failure becomes a spoken, honest message instead of a blank box.
+  async function call<T = Record<string, unknown>>(path: string, body: unknown): Promise<T & { ok: boolean; reason?: string }> {
+    try {
+      return await api<T>(path, body);
+    } catch {
+      return { ok: false, reason: "unreachable" } as T & { ok: boolean; reason?: string };
+    }
+  }
+
   const tell = async (t: string) => {
     setMessage(t);
     await speak(t);
   };
 
   async function begin() {
-    const r = await api<{ requestId: string; challenge: string; readBack: string }>("/api/pay/start", { payeeId, amountMinor });
+    const r = await call<{ requestId: string; challenge: string; readBack: string }>("/api/pay/start", { payeeId, amountMinor });
     if (r.ok) {
       req.current = { requestId: r.requestId, challenge: r.challenge };
       setPhase("pin");
@@ -69,7 +78,7 @@ export default function Approve({ payeeId, amountMinor, speak, listen, onClose }
   }
 
   async function cancel() {
-    if (req.current) await api("/api/pay/cancel", { requestId: req.current.requestId }).catch(() => undefined);
+    if (req.current) await call("/api/pay/cancel", { requestId: req.current.requestId }).catch(() => undefined);
     req.current = null;
     setPin("");
     setPhase("stopped");
@@ -92,7 +101,7 @@ export default function Approve({ payeeId, amountMinor, speak, listen, onClose }
         setPhase("set_pin");
         return void tell("The two PINs were different. Choose a PIN again.");
       }
-      const s = await api("/api/pin", { pin: p });
+      const s = await call("/api/pin", { pin: p });
       if (!s.ok) {
         setPhase("set_pin");
         return void tell(s.reason === "weak_pin" ? "That PIN is too easy to guess. Choose another one." : approvalMessage({ ok: false, reason: s.reason ?? "unknown" }));
@@ -103,7 +112,7 @@ export default function Approve({ payeeId, amountMinor, speak, listen, onClose }
     }
     if (phase !== "pin" || !req.current) return;
     setPhase("sending");
-    const r = await api<{ receipt: Receipt; spoken: string; challenge?: string; triesLeft?: number }>("/api/pay/finish", {
+    const r = await call<{ receipt: Receipt; spoken: string; challenge?: string; triesLeft?: number }>("/api/pay/finish", {
       requestId: req.current.requestId,
       proof: { method: "pin", challenge: req.current.challenge, pin: p },
     });

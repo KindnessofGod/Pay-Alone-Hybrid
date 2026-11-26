@@ -9,6 +9,7 @@ const FIXED: Record<string, string> = {
   not_found: "That payment has expired or was cancelled. Nothing was sent. Please start again.",
   bad_challenge: "That approval has expired. Nothing was sent. Please start again.",
   bad_passkey: "Your fingerprint or Windows Hello did not work. Type your PIN instead, or say no to cancel.",
+  unreachable: "I could not reach the approval server. Nothing was sent. Please try again.",
   signed_out: "You are signed out. Please reload the page. Nothing was sent.",
 };
 

@@ -157,3 +157,14 @@ describe("why a path was skipped is reported (no secrets in it)", () => {
     expect(JSON.stringify(r.skipped)).not.toMatch(/Tunde|5000/);
   });
 });
+
+describe("skip reasons stay short and useful", () => {
+  it("drops long URLs so the actual error is visible", async () => {
+    const e = engines({
+      onDevice: vi.fn(async () => { throw new Error("x"); }),
+      cloud: vi.fn(async () => { throw new Error("AI: Error fetching from https://firebasevertexai.googleapis.com/v1beta/projects/p/models/m:generateContent: [401 ] Firebase App Check token is invalid."); }),
+    });
+    const r = await understand("send 5000 naira to Tunde", { contacts, limitMinor, policy: "on_device_first", deviceAvailable: true }, e);
+    expect(r.skipped?.[1]).toBe("online: AI: Error fetching from (link): [# ] Firebase App Check token is invalid.");
+  });
+});

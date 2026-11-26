@@ -50,27 +50,42 @@ export default function Home() {
     await say(t);
   }, []);
 
-  async function start() {
-    const configured = firebaseConfigured();
-    if (configured) {
+  type Settings = { policy: Policy; limitMinor: string; nano: string };
+
+  async function start(greet = true): Promise<Settings> {
+    let policyNow = policy;
+    let limitNow = limitMinor;
+    if (firebaseConfigured()) {
       const s = await remoteSettings();
+      policyNow = s.policy;
+      limitNow = s.limitMinor;
       setPolicy(s.policy);
       setLimitMinor(s.limitMinor);
       setNano("preparing");
       await prepareOnDevice((p) => setNano(`downloading ${Math.round(p * 100)}%`));
     }
-    setNano(await nanoAvailability());
+    const nanoNow = await nanoAvailability();
+    setNano(nanoNow);
     let sp = await localSpeechStatus();
     if (sp === "installable") sp = (await installLocalSpeech()) ? "local" : "server";
     setSpeech(sp);
     setReady(true);
-    await speak("Pay Alone is ready. Press the big button or the space bar, then say who to pay and how much.");
+    if (greet) await speak("Pay Alone is ready. Press the big button or the space bar, then say who to pay and how much.");
+    return { policy: policyNow, limitMinor: limitNow, nano: nanoNow };
+  }
+
+  // Typing works before Start too: the Go press is the user gesture that starts Gemini Nano.
+  async function submitTyped() {
+    if (!typed) return;
+    const s = ready ? undefined : await start(false);
+    await handle(typed, s);
   }
 
   const handle = useCallback(
-    async (said: string) => {
+    async (said: string, now?: Settings) => {
       setHeard(said);
-      const r = await understand(said, { contacts: CONTACTS, limitMinor, policy, deviceAvailable: nano === "available" }, firebaseEngines);
+      const c = now ?? { policy, limitMinor, nano };
+      const r = await understand(said, { contacts: CONTACTS, limitMinor: c.limitMinor, policy: c.policy, deviceAvailable: c.nano === "available" }, firebaseEngines);
       setMs(lastCall.ms);
       if (r.kind === "secret_spoken") {
         setHeard("(deleted)");
@@ -126,7 +141,7 @@ export default function Home() {
       <p className="tag">Speak it. Approve it. The AI is never allowed to move your money.</p>
 
       {!ready ? (
-        <button className="big" onClick={start}>
+        <button className="big" onClick={() => void start()}>
           Start
         </button>
       ) : (
@@ -136,8 +151,8 @@ export default function Home() {
       )}
 
       <div className="row">
-        <input aria-label="Or type what you want to do" placeholder="Or type: send 5000 naira to Mama Ade" value={typed} onChange={(e) => setTyped(e.target.value)} onKeyDown={(e) => e.key === "Enter" && typed && void handle(typed)} />
-        <button onClick={() => typed && void handle(typed)}>Go</button>
+        <input aria-label="Or type what you want to do" placeholder="Or type: send 5000 naira to Mama Ade" value={typed} onChange={(e) => setTyped(e.target.value)} onKeyDown={(e) => e.key === "Enter" && void submitTyped()} />
+        <button onClick={() => void submitTyped()}>Go</button>
       </div>
 
       {ready && speech !== "local" && (
