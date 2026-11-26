@@ -11,5 +11,5 @@ export function readBack(p: Proposal): string {
 
 /** Read-back built from the quote: the amount that will leave the wallet, fees included (rule 7). */
 export function quoteReadBack(payeeName: string, debit: Amount): string {
-  return `You want to send money to ${payeeName}. It will take ${speakPlain(debit)} from your wallet, fees included. To approve, use your fingerprint or type your PIN. Say no to cancel.`;
+  return `You want to send money to ${payeeName}. It will take ${speakPlain(debit)} from your wallet, fees included. To approve, type your PIN. Say no to cancel.`;
 }

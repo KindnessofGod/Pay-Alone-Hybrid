@@ -3,20 +3,17 @@
 // with the keyboard only (Space to talk).
 import { useCallback, useEffect, useRef, useState } from "react";
 import { understand, type Policy, type Understood } from "@/lib/hybrid/understand";
-import { readBack } from "@/lib/hybrid/readback";
 import type { Contact } from "@/lib/hybrid/crosscheck";
 import { nanoAvailability } from "@/lib/hybrid/device";
 import { installLocalSpeech, listenOnce, localSpeechStatus, say } from "@/lib/hybrid/listen";
 import { firebaseConfigured, remoteSettings } from "@/lib/firebase/client";
 import { speechMode, type SpeechStatus } from "@/lib/hybrid/speechpolicy";
 import { firebaseEngines, lastCall, prepareOnDevice } from "@/lib/firebase/engines";
+import { DEMO_CONTACTS } from "@/lib/demo/contacts";
+import Approve from "./Approve";
 
-// SIMULATED test contacts until the saved-contacts screen exists.
-const CONTACTS: Contact[] = [
-  { id: "c1", name: "Mama Ade" },
-  { id: "c2", name: "Tunde" },
-  { id: "c3", name: "Chidi Okafor" },
-];
+// SIMULATED test contacts until the saved-contacts screen exists (the server checks the same list).
+const CONTACTS: Contact[] = DEMO_CONTACTS.map((c) => ({ ...c }));
 
 const REASONS: Record<string, string> = {
   unknown_payee: "I don't know that person. I can only send to people saved in your list.",
@@ -45,6 +42,7 @@ export default function Home() {
   const [result, setResult] = useState<Understood | null>(null);
   const [spoken, setSpoken] = useState("");
   const [ms, setMs] = useState(0);
+  const [approving, setApproving] = useState<{ payeeId: string; amountMinor: string; key: number } | null>(null);
   const busy = useRef(false);
 
   const speak = useCallback(async (t: string) => {
@@ -81,7 +79,7 @@ export default function Home() {
         return;
       }
       setResult(r);
-      if (r.kind === "proposal") await speak(readBack(r.proposal));
+      if (r.kind === "proposal") setApproving({ payeeId: r.proposal.payeeId, amountMinor: r.proposal.amountMinor, key: Date.now() });
       else if (r.kind === "rejected") await speak(REASONS[r.reason] ?? "I could not do that.");
       else if (r.kind === "intent") await speak(`You asked about ${r.action}. That part is coming soon.`);
       else await speak("Sorry, I did not understand. Say who to pay and how much.");
@@ -113,14 +111,14 @@ export default function Home() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.code === "Space" && ready && document.activeElement?.tagName !== "INPUT") {
+      if (e.code === "Space" && ready && !approving && document.activeElement?.tagName !== "INPUT") {
         e.preventDefault();
         void talk();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [ready, talk]);
+  }, [ready, talk, approving]);
 
   return (
     <main>
@@ -164,9 +162,21 @@ export default function Home() {
               <p className="status">What the cloud received: <code>{result.sentToCloud}</code></p>
             )}
             {ms > 0 && result.kind !== "secret_spoken" && result.source !== "rules" && <p className="status">Model time: {ms} ms</p>}
-            <p>{spoken}</p>
-            {result.kind === "proposal" && <p className="sim">Approval with fingerprint or PIN is the next step (being built).</p>}
+            {!approving && <p>{spoken}</p>}
           </div>
+        )}
+        {approving && (
+          <Approve
+            key={approving.key}
+            payeeId={approving.payeeId}
+            amountMinor={approving.amountMinor}
+            speak={speak}
+            listen={(() => {
+              const m = speechMode(speech === "checking" ? "none" : speech, cloudSpeech);
+              return m.mic ? () => listenOnce({ local: m.local }) : null;
+            })()}
+            onClose={() => setApproving(null)}
+          />
         )}
       </div>
 

@@ -24,6 +24,19 @@ Voice payments for people who cannot use a banking screen: blind and low-vision 
 4. **Template read-back**: model text is never spoken, so a model can never say money moved: `readback.ts` (+ test).
 5. **AI cannot pay**: `understand()` returns a proposal that still needs approval; extra model fields are dropped: `understand.test.ts`.
 6. **AI off still works**: Remote Config `routing_policy = ai_off` falls back to plain rules.
+7. **The server approves, not the browser**: the server re-checks payee and amount, quotes, reads back the QUOTE, and checks the PIN itself (salted hash, 5 tries then a 15-minute lock, stored per user). Each approval is bound to one request, quote and amount and works once; a tap alone is refused; a payment is paid once even if the approval is sent twice: `src/lib/server/payflow.ts`, `src/lib/security/approve.ts` (+ tests).
+8. **Firestore is server-only**: the rules deny every browser read and write; only the server (Admin SDK) stores PINs, pending payments and receipts. Rules and API are tested on the Firebase emulators: `firestore.rules`, `src/emu/` (`npm run test:emu`).
+9. **"No" means no**: "No, don't send it" cancels; a spoken "yes" only asks for the PIN: `src/lib/hybrid/confirm.ts` (+ test).
+
+## What is real and what is simulated
+| Part | Status |
+|---|---|
+| Voice understanding (Nano on-device, Gemini online with redaction, plain rules) | Implemented |
+| PIN tripwire, redaction, cross-check, template read-back | Implemented |
+| Server-checked PIN approval, receipts written by the server to Firestore | Implemented |
+| Contacts (Mama Ade, Tunde, Chidi Okafor) | **Simulated** test list |
+| Quote and payment | **Simulated** (no money moves) until the Open Payments test-wallet rail is wired |
+| Windows Hello / phone passkey approval | Planned (server check written and tested; screen not wired) |
 
 ## Judge quick test
 1. Open the live URL in desktop Chrome, press **Start**, then press Space and say "send five thousand naira to Mama Ade". Or type it.
@@ -31,7 +44,7 @@ Voice payments for people who cannot use a banking screen: blind and low-vision 
 3. Say "my PIN is one two three four": it is stopped and deleted before any AI sees it.
 
 ## Run locally
-`npm install`, copy `.env.example` to `.env.local` and fill it in, then `npm run dev`. Tests: `npm test`.
+`npm install`, copy `.env.example` to `.env.local` and fill it in, then `npm run dev`. Tests: `npm test`. Emulator tests (Firestore rules, store, API; needs Java): `npm run test:emu`.
 
 ## Licence and disclosures
 Apache-2.0 (see `LICENSE`). Prior work and AI assistance: `DISCLOSURES.md`.

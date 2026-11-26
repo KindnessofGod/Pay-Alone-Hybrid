@@ -59,3 +59,25 @@ export async function remoteSettings(): Promise<{ policy: Policy; limitMinor: st
     return defaults;
   }
 }
+
+/**
+ * Calls one of our payment API routes as the signed-in (anonymous) Firebase user.
+ * The server reads the user id from the verified token, never from the body.
+ */
+export async function api<T = Record<string, unknown>>(path: string, body: unknown): Promise<T & { ok: boolean; reason?: string }> {
+  const { connectAuthEmulator, getAuth, signInAnonymously } = await import("firebase/auth");
+  const auth = getAuth(firebaseApp());
+  const emu = process.env.NEXT_PUBLIC_AUTH_EMULATOR; // local tests only, e.g. http://127.0.0.1:9099
+  if (emu && !auth.emulatorConfig) connectAuthEmulator(auth, emu, { disableWarnings: true });
+  const user = auth.currentUser ?? (await signInAnonymously(auth)).user;
+  const res = await fetch(path, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${await user.getIdToken()}` },
+    body: JSON.stringify(body),
+  });
+  try {
+    return await res.json();
+  } catch {
+    return { ok: false, reason: `http_${res.status}` } as T & { ok: boolean; reason?: string };
+  }
+}
