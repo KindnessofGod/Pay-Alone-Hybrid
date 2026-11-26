@@ -2,7 +2,7 @@
 
 Voice payments for people who cannot use a banking screen: blind and low-vision people, elderly people, and people who cannot read. Entry for **#BuildHybridAI 2026** (Firebase AI Logic hybrid inference). Platform: **Web (desktop Chrome with Gemini Nano; any browser through the cloud path)**.
 
-> Status, 26 Nov 2026 night: voice screen, hybrid router, spoken-PIN tripwire, cloud redaction and plain-code cross-check are built and tested (94 tests). Approval (passkey or PIN) and the Open Payments test-wallet rail are next. Contacts on screen are simulated test data. Test money only.
+> Status, 26 Nov 2026 night: voice screen, hybrid router, spoken-PIN tripwire, cloud redaction and plain-code cross-check are built and tested (151 tests, including the red-team fixes). Approval (passkey or PIN) and the Open Payments test-wallet rail are next. Contacts on screen are simulated test data. Test money only.
 
 ## How Firebase AI Logic hybrid inference is used
 | Task | Mode | Why | File |
