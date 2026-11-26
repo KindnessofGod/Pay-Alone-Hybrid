@@ -1,5 +1,4 @@
 // Wires the payment flow to the real store and sign-in check. Server side only.
-import { getAppCheck } from "firebase-admin/app-check";
 import { getAuth } from "firebase-admin/auth";
 import { DEMO_CONTACTS } from "../demo/contacts";
 import { randomToken } from "../secret";
@@ -18,6 +17,8 @@ export function appCheckGate(): VerifyAppCheck | undefined {
   if (process.env.APPCHECK_ENFORCE !== "1") return undefined;
   return async (token) => {
     if (!token) throw new Error("no App Check token");
+    // Loaded only when enforcing: its key-fetching dependency fails to load on Vercel's runtime otherwise.
+    const { getAppCheck } = await import("firebase-admin/app-check");
     await getAppCheck(adminApp()).verifyToken(token);
   };
 }
