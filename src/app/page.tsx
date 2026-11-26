@@ -8,6 +8,7 @@ import type { Contact } from "@/lib/hybrid/crosscheck";
 import { nanoAvailability } from "@/lib/hybrid/device";
 import { installLocalSpeech, listenOnce, localSpeechStatus, say } from "@/lib/hybrid/listen";
 import { firebaseConfigured, remoteSettings } from "@/lib/firebase/client";
+import { speechMode, type SpeechStatus } from "@/lib/hybrid/speechpolicy";
 import { firebaseEngines, lastCall, prepareOnDevice } from "@/lib/firebase/engines";
 
 // SIMULATED test contacts until the saved-contacts screen exists.
@@ -34,7 +35,8 @@ const SOURCE_LABEL: Record<string, string> = {
 export default function Home() {
   const [ready, setReady] = useState(false);
   const [nano, setNano] = useState("checking");
-  const [speech, setSpeech] = useState("checking");
+  const [speech, setSpeech] = useState<SpeechStatus | "checking">("checking");
+  const [cloudSpeech, setCloudSpeech] = useState(false);
   const [policy, setPolicy] = useState<Policy>("on_device_first");
   const [limitMinor, setLimitMinor] = useState("5000000");
   const [listening, setListening] = useState(false);
@@ -89,10 +91,15 @@ export default function Home() {
 
   const talk = useCallback(async () => {
     if (busy.current) return;
+    const mode = speechMode(speech === "checking" ? "none" : speech, cloudSpeech);
+    if (!mode.mic) {
+      await speak("Speaking is off on this computer, to keep your voice private. Please type instead.");
+      return;
+    }
     busy.current = true;
     setListening(true);
     try {
-      const said = await listenOnce({ local: speech === "local" });
+      const said = await listenOnce({ local: mode.local });
       setListening(false);
       if (said) await handle(said);
       else await speak("I did not hear anything. Try again.");
@@ -102,7 +109,7 @@ export default function Home() {
     } finally {
       busy.current = false;
     }
-  }, [handle, speak, speech]);
+  }, [handle, speak, speech, cloudSpeech]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -134,6 +141,15 @@ export default function Home() {
         <input aria-label="Or type what you want to do" placeholder="Or type: send 5000 naira to Mama Ade" value={typed} onChange={(e) => setTyped(e.target.value)} onKeyDown={(e) => e.key === "Enter" && typed && void handle(typed)} />
         <button onClick={() => typed && void handle(typed)}>Go</button>
       </div>
+
+      {ready && speech !== "local" && (
+        <p className="status">
+          <label>
+            <input type="checkbox" checked={cloudSpeech} onChange={(e) => setCloudSpeech(e.target.checked)} /> Use online speech recognition. Your voice
+            will be sent to Google. Never say a PIN.
+          </label>
+        </p>
+      )}
 
       <div aria-live="polite">
         {result && (

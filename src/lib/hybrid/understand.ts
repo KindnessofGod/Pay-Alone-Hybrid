@@ -11,6 +11,7 @@
 //   4. The result is a proposal that still needs the person's own approval. Nothing here can pay.
 import { spokenSecret, type SecretKind } from "./tripwire";
 import { redactForCloud } from "./redact";
+import { validContactName } from "./contacts";
 import { crossCheck, type AiIntent, type CheckReason, type Contact, type Proposal } from "./crosscheck";
 
 export type Policy = "on_device_first" | "on_device_only" | "cloud_only" | "ai_off";
@@ -81,7 +82,9 @@ export function rulesIntent(said: string, contacts: Contact[]): AiIntent {
   return { action: "unclear", amountMinor: null, payee: null };
 }
 
-export async function understand(said: string, ctx: Context, engines: Engines): Promise<Understood> {
+export async function understand(said: string, input: Context, engines: Engines): Promise<Understood> {
+  // Saved names are untrusted: any name that is not a plain name is dropped before anything else.
+  const ctx = { ...input, contacts: input.contacts.filter((c) => validContactName(c.name)) };
   const secret = spokenSecret(said);
   if (secret.tripped) return { kind: "secret_spoken", secret: secret.kind ?? "pin", source: "rules" };
 
