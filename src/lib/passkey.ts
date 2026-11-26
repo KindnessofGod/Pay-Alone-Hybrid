@@ -1,4 +1,5 @@
-// Fingerprint approval with a WebAuthn passkey. On an iPad Air 3 this is Touch ID on the Home button.
+// Approval with a WebAuthn passkey: the device's own unlock (Windows Hello PIN or face, Touch ID,
+// or a phone nearby via its fingerprint). Any authenticator is allowed, but user verification is required.
 //
 // The biometric never leaves the device. The device signs a challenge, and our server checks the
 // signature against the public key saved when the fingerprint was set up. The challenge is the
@@ -55,8 +56,8 @@ export async function registrationOptions(args: {
     attestationType: "none",
     timeout: TIMEOUT_MS,
     excludeCredentials: args.existing.map((p) => ({ id: p.id, transports: p.transports })),
-    // The device's own unlock (Touch ID on the iPad Air 3), not a separate security key.
-    authenticatorSelection: { authenticatorAttachment: "platform", residentKey: "preferred", userVerification: "required" },
+    // No attachment rule: the owner's laptop has no fingerprint reader, so Windows Hello or a phone must both work.
+    authenticatorSelection: { residentKey: "preferred", userVerification: "required" },
   });
   return { options, pending: { challenge: options.challenge, expiresAt: new Date(Date.now() + TIMEOUT_MS).toISOString() } };
 }
