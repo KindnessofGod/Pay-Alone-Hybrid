@@ -45,19 +45,41 @@ export async function installLocalSpeech(lang = "en-US"): Promise<boolean> {
   }
 }
 
-export function listenOnce(opts: { lang?: string; local: boolean }): Promise<string> {
+let current: Rec | undefined;
+
+/** Stops listening now (the person pressed the button again, or typed instead). */
+export function stopListening(): void {
+  current?.stop();
+}
+
+/** Listens for one sentence. Ends on silence, on stopListening(), or after maxMs at the latest. */
+export function listenOnce(opts: { lang?: string; local: boolean; maxMs?: number }): Promise<string> {
   return new Promise((resolve, reject) => {
     const C = ctor();
     if (!C) return reject(new Error("no speech recognition"));
+    current?.stop();
     const r = new C();
+    current = r;
     r.lang = opts.lang ?? "en-US";
     r.interimResults = false;
     r.maxAlternatives = 1;
     if (opts.local) r.processLocally = true;
     let heard = "";
+    const limit = setTimeout(() => r.stop(), opts.maxMs ?? 10_000);
+    const done = () => {
+      clearTimeout(limit);
+      if (current === r) current = undefined;
+    };
     r.onresult = (e) => (heard = e.results[0]?.[0]?.transcript ?? "");
-    r.onerror = (e) => reject(new Error(e.error));
-    r.onend = () => resolve(heard);
+    r.onerror = (e) => {
+      done();
+      if (e.error === "no-speech" || e.error === "aborted") resolve(heard);
+      else reject(new Error(e.error));
+    };
+    r.onend = () => {
+      done();
+      resolve(heard);
+    };
     r.start();
   });
 }

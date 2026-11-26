@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { understand, type Policy, type Understood } from "@/lib/hybrid/understand";
 import type { Contact } from "@/lib/hybrid/crosscheck";
 import { nanoAvailability } from "@/lib/hybrid/device";
-import { installLocalSpeech, listenOnce, localSpeechStatus, say } from "@/lib/hybrid/listen";
+import { installLocalSpeech, listenOnce, localSpeechStatus, say, stopListening } from "@/lib/hybrid/listen";
 import { firebaseConfigured, remoteSettings } from "@/lib/firebase/client";
 import { speechMode, type SpeechStatus } from "@/lib/hybrid/speechpolicy";
 import { firebaseEngines, lastCall, prepareOnDevice } from "@/lib/firebase/engines";
@@ -78,6 +78,7 @@ export default function Home() {
   // Typing works before Start too: the Go press is the user gesture that starts Gemini Nano.
   async function submitTyped() {
     if (!typed) return;
+    stopListening(); // typing wins over a microphone that is still open
     const s = ready ? undefined : await start(false);
     await handle(typed, s);
   }
@@ -107,7 +108,7 @@ export default function Home() {
   );
 
   const talk = useCallback(async () => {
-    if (busy.current) return;
+    if (busy.current) return stopListening(); // a second press stops listening
     const mode = speechMode(speech === "checking" ? "none" : speech, cloudSpeech);
     if (!mode.mic) {
       await speak("Speaking is off on this computer, to keep your voice private. Please type instead.");
@@ -116,8 +117,10 @@ export default function Home() {
     busy.current = true;
     setListening(true);
     try {
+      const before = seq.current;
       const said = await listenOnce({ local: mode.local });
       setListening(false);
+      if (seq.current !== before) return; // the person typed while the mic was open: their typing wins
       if (said) await handle(said);
       else await speak("I did not hear anything. Try again.");
     } catch {
