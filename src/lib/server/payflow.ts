@@ -14,6 +14,7 @@ import { randomToken } from "../secret";
 import type { Store } from "../store";
 import { approvePayment, type ChallengeStore } from "../security/approve";
 import { checkPin, setPin, type PinStore } from "../security/pin";
+import { saveCounter } from "./passkeystore";
 
 export interface Contact {
   id: string;
@@ -91,7 +92,7 @@ export async function startPayment(
   userId: string,
   body: { payeeId?: unknown; amountMinor?: unknown },
 ): Promise<
-  | { ok: true; requestId: string; challenge: string; readBack: string; debit: Amount; payeeName: string; simulated: boolean }
+  | { ok: true; requestId: string; challenge: string; readBack: string; debit: Amount; payeeName: string; simulated: boolean; hasPasskey: boolean }
   | { ok: false; reason: "no_pin_set" | "wallet_not_connected" | "unknown_payee" | "bad_amount" | "over_limit" | "quote_failed" }
 > {
   if (!(await pinStoreOf(d.store).get(userId))) return { ok: false, reason: "no_pin_set" };
@@ -119,6 +120,7 @@ export async function startPayment(
     debit: quote.debit,
     payeeName: payee.name,
     simulated: quote.simulated,
+    hasPasskey: ((await d.passkeys?.(userId)) ?? []).length > 0,
   };
 }
 
@@ -155,6 +157,9 @@ export async function finishPayment(
     if (a.reason === "wrong" || a.reason === "bad_passkey") return { ok: false, reason: a.reason, triesLeft: a.triesLeft, challenge: await newChallenge(d, pending) };
     return { ok: false, reason: a.reason };
   }
+
+  // Keep the device's new signature counter, so an old fingerprint signature cannot be replayed.
+  if (a.method === "passkey" && a.passkeyId && typeof a.newCounter === "number") await saveCounter(d.store, userId, a.passkeyId, a.newCounter);
 
   // Take the pending payment so it can be paid only once.
   const mine = await d.store.take<Pending>("pending", key);

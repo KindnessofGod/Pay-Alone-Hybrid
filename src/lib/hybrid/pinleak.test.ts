@@ -118,3 +118,37 @@ describe("PIN-leak test: open conversation (chat.ts)", () => {
     for (const s of spies) for (const c of s.mock.calls) expect(JSON.stringify(c)).not.toMatch(/4826/);
   });
 });
+
+describe("PIN-leak test: the PIN sent to /api/passkey/options (adding a fingerprint)", () => {
+  it("never appears in results, stored documents, logs or network calls, right PIN or wrong", async () => {
+    const { MemoryStore } = await import("../store/memory");
+    const { setUserPin } = await import("../server/payflow");
+    const { passkeyOptions } = await import("../server/passkeyflow");
+    const { handle } = await import("../server/http");
+    process.env.APP_SECRET = "test-secret-test-secret-test-secret-1234";
+    const store = new MemoryStore();
+    const d = { store, baseUrl: "https://pay-alone-hybrid.vercel.app", limitMinor: 1, contacts: async () => [], quote: async () => ({ quoteId: "q", debit: { value: "1", assetCode: "NGN", assetScale: 2 }, simulated: true }), pay: async () => ({ paymentId: "p", simulated: true }) };
+    await setUserPin(d, "u1", { pin: "4826" });
+    const spies = [vi.spyOn(console, "log"), vi.spyOn(console, "warn"), vi.spyOn(console, "error")];
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    const seen: string[] = [];
+    for (const pin of ["7391", "4826"]) {
+      seen.push(JSON.stringify(await passkeyOptions(d, "u1", { pin })));
+      // the same call through the HTTP wrapper, with a handler that throws on purpose
+      const res = await handle(
+        new Request("https://x.test/api/passkey/options", { method: "POST", headers: { authorization: "Bearer t" }, body: JSON.stringify({ pin }) }),
+        async () => "u1",
+        async (_u, body) => {
+          throw new Error(`boom ${JSON.stringify(body)}`);
+        },
+      );
+      seen.push(await res.text());
+    }
+    for (const col of ["pins", "passkey_pending", "passkeys", "challenges"]) seen.push(JSON.stringify(await store.list(col)).replace(/"(salt|hash)":"[^"]*"/g, ""));
+    for (const text of seen) expect(text).not.toMatch(/7391|4826/);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    for (const spy of spies) for (const c of spy.mock.calls) expect(JSON.stringify(c)).not.toMatch(/7391|4826/);
+    vi.unstubAllGlobals();
+  });
+});

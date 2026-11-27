@@ -5,12 +5,13 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/firebase/client";
 import { yesNo } from "@/lib/hybrid/confirm";
 import { spokenSecret } from "@/lib/hybrid/tripwire";
+import { FINGERPRINT_FAILED, FINGERPRINT_OFFER, FINGERPRINT_PROMPT, fingerprintAvailable, fingerprintRequest } from "@/lib/ui/fingerprint";
 import { formatAmount } from "@/lib/money";
 import { approvalMessage } from "@/lib/ui/messages";
 import { pinAnnouncement, pinPress } from "@/lib/ui/pinpad";
 import { saveResume } from "@/lib/ui/resume";
 
-type Phase = "connect" | "starting" | "set_pin" | "confirm_pin" | "pin" | "sending" | "done" | "stopped";
+type Phase = "connect" | "starting" | "set_pin" | "confirm_pin" | "pin" | "offer_pin" | "sending" | "done" | "stopped";
 
 interface Props {
   payeeId: string;
@@ -29,12 +30,22 @@ interface Receipt {
   createdAt: string;
 }
 
+function alreadyDeclined(): boolean {
+  try {
+    return window.localStorage.getItem("pay_alone_fp_offer_declined") === "1";
+  } catch {
+    return false;
+  }
+}
+
 export default function Approve({ payeeId, amountMinor, speak, listen, onClose }: Props) {
   const [phase, setPhase] = useState<Phase>("starting");
   const [pin, setPin] = useState("");
   const [firstPin, setFirstPin] = useState("");
   const [message, setMessage] = useState("");
   const [receipt, setReceipt] = useState<Receipt | null>(null);
+  const [hasPasskey, setHasPasskey] = useState(false);
+  const [offer, setOffer] = useState(false); // after a PIN receipt: offer the fingerprint once
   const req = useRef<{ requestId: string; challenge: string } | null>(null);
   const started = useRef(false);
 
@@ -53,11 +64,13 @@ export default function Approve({ payeeId, amountMinor, speak, listen, onClose }
   };
 
   async function begin() {
-    const r = await call<{ requestId: string; challenge: string; readBack: string }>("/api/pay/start", { payeeId, amountMinor });
+    const r = await call<{ requestId: string; challenge: string; readBack: string; hasPasskey?: boolean }>("/api/pay/start", { payeeId, amountMinor });
     if (r.ok) {
       req.current = { requestId: r.requestId, challenge: r.challenge };
       setPhase("pin");
-      await tell(r.readBack);
+      const fp = Boolean(r.hasPasskey) && fingerprintAvailable();
+      setHasPasskey(Boolean(r.hasPasskey));
+      await tell(fp ? `${r.readBack} ${FINGERPRINT_PROMPT}` : r.readBack);
       void voiceNo();
     } else if (r.reason === "no_pin_set") {
       setPhase("set_pin");
@@ -127,6 +140,7 @@ export default function Approve({ payeeId, amountMinor, speak, listen, onClose }
       setPhase("starting");
       return void begin();
     }
+    if (phase === "offer_pin") return void addFingerprint(p);
     if (phase !== "pin" || !req.current) return;
     setPhase("sending");
     const r = await call<{ receipt: Receipt; spoken: string; challenge?: string; triesLeft?: number }>("/api/pay/finish", {
@@ -137,7 +151,12 @@ export default function Approve({ payeeId, amountMinor, speak, listen, onClose }
       req.current = null;
       setReceipt(r.receipt);
       setPhase("done");
-      return void tell(r.spoken);
+      await tell(r.spoken);
+      if (!hasPasskey && fingerprintAvailable() && !alreadyDeclined()) {
+        setOffer(true);
+        await speak(FINGERPRINT_OFFER);
+      }
+      return;
     }
     if (r.challenge) {
       req.current = { ...req.current, challenge: r.challenge };
@@ -149,6 +168,71 @@ export default function Approve({ payeeId, amountMinor, speak, listen, onClose }
     await tell(approvalMessage({ ok: false, reason: r.reason ?? "unknown", triesLeft: r.triesLeft }));
   }
 
+  // Fingerprint: the device signs this payment's challenge; the server checks the signature and decides.
+  async function approveWithFingerprint() {
+    if (phase !== "pin" || !req.current) return;
+    const cur = req.current;
+    setPhase("sending");
+    let response: unknown;
+    try {
+      const { startAuthentication } = await import("@simplewebauthn/browser");
+      response = await startAuthentication({ optionsJSON: fingerprintRequest(cur.challenge) });
+    } catch {
+      setPhase("pin"); // cancelled or no sensor: nothing reached the server, the same challenge still works
+      return void tell(FINGERPRINT_FAILED);
+    }
+    const r = await call<{ receipt: Receipt; spoken: string; challenge?: string; triesLeft?: number }>("/api/pay/finish", {
+      requestId: cur.requestId,
+      proof: { method: "passkey", challenge: cur.challenge, response },
+    });
+    if (r.ok) {
+      req.current = null;
+      setReceipt(r.receipt);
+      setPhase("done");
+      return void tell(r.spoken);
+    }
+    if (r.challenge) {
+      req.current = { ...cur, challenge: r.challenge };
+      setPhase("pin");
+    } else {
+      req.current = null;
+      setPhase("stopped");
+    }
+    await tell(approvalMessage({ ok: false, reason: r.reason ?? "unknown", triesLeft: r.triesLeft }));
+  }
+
+  // Offered once, after a payment approved with the PIN. Adding a fingerprint asks for the PIN again.
+  async function addFingerprint(p: string) {
+    setPhase("sending");
+    const o = await call<{ options: unknown; triesLeft?: number }>("/api/passkey/options", { pin: p });
+    if (!o.ok) {
+      const stay = o.reason === "wrong" || o.reason === "bad_pin";
+      setPhase(stay ? "offer_pin" : "done");
+      return void tell(approvalMessage({ ok: false, reason: o.reason ?? "unknown", triesLeft: o.triesLeft }));
+    }
+    let response: unknown;
+    try {
+      const { startRegistration } = await import("@simplewebauthn/browser");
+      response = await startRegistration({ optionsJSON: o.options as Parameters<typeof startRegistration>[0]["optionsJSON"] });
+    } catch {
+      setPhase("done");
+      return void tell("Fingerprint was not added. Nothing was changed. You can still use your PIN.");
+    }
+    const r = await call("/api/passkey/register", { response });
+    setPhase("done");
+    setHasPasskey(r.ok);
+    await tell(r.ok ? "Done. Next time you can approve with your fingerprint." : approvalMessage({ ok: false, reason: r.reason ?? "unknown" }));
+  }
+
+  async function declineOffer() {
+    setOffer(false);
+    try {
+      window.localStorage.setItem("pay_alone_fp_offer_declined", "1");
+    } catch {
+      /* no storage: it may be offered again, which is harmless */
+    }
+  }
+
   useEffect(() => {
     if (started.current) return;
     started.current = true;
@@ -156,12 +240,18 @@ export default function Approve({ payeeId, amountMinor, speak, listen, onClose }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const typing = phase === "set_pin" || phase === "confirm_pin" || phase === "pin";
-  const title = phase === "set_pin" ? "Choose your PIN" : phase === "confirm_pin" ? "Type the same PIN again" : "Type your PIN to approve";
+  const typing = phase === "set_pin" || phase === "confirm_pin" || phase === "pin" || phase === "offer_pin";
+  const fingerprintReady = phase === "pin" && hasPasskey && fingerprintAvailable();
+  const title = phase === "set_pin" ? "Choose your PIN" : phase === "confirm_pin" ? "Type the same PIN again" : phase === "offer_pin" ? "Type your PIN to add your fingerprint" : phase === "pin" && hasPasskey ? "Or type your PIN to approve" : "Type your PIN to approve";
 
   return (
     <section className="card approve" aria-label="Approve payment">
       <p>{message}</p>
+      {fingerprintReady && (
+        <button type="button" className="big ok" onClick={() => void approveWithFingerprint()}>
+          Approve with fingerprint
+        </button>
+      )}
       {typing && (
         <form
           onSubmit={(e) => {
@@ -195,10 +285,10 @@ export default function Approve({ payeeId, amountMinor, speak, listen, onClose }
           </div>
           <div className="row">
             <button type="submit" className="ok">
-              {phase === "pin" ? "Approve with PIN" : "Save"}
+              {phase === "pin" ? "Approve with PIN" : phase === "offer_pin" ? "Add fingerprint" : "Save"}
             </button>
-            <button type="button" className="no" onClick={() => void cancel()}>
-              No, cancel
+            <button type="button" className="no" onClick={() => (phase === "offer_pin" ? (setPin(""), setPhase("done")) : void cancel())}>
+              {phase === "offer_pin" ? "Not now" : "No, cancel"}
             </button>
           </div>
         </form>
@@ -213,7 +303,7 @@ export default function Approve({ payeeId, amountMinor, speak, listen, onClose }
           </button>
         </div>
       )}
-      {phase === "sending" && <p className="status">Checking your PIN on the server...</p>}
+      {phase === "sending" && <p className="status">Checking on the server...</p>}
       {receipt && (
         <div className="receipt">
           <p>
@@ -222,6 +312,19 @@ export default function Approve({ payeeId, amountMinor, speak, listen, onClose }
           <p className="status">
             To {receipt.payeeName} · {formatAmount(receipt.debit)} · {new Date(receipt.createdAt).toLocaleString()} · saved by the server
           </p>
+        </div>
+      )}
+      {phase === "done" && offer && (
+        <div className="receipt">
+          <p>{FINGERPRINT_OFFER}</p>
+          <div className="row">
+            <button type="button" className="ok" onClick={() => (setOffer(false), setPhase("offer_pin"), void tell("Type your PIN to add your fingerprint."))}>
+              Yes, add fingerprint
+            </button>
+            <button type="button" className="no" onClick={() => void declineOffer()}>
+              Not now
+            </button>
+          </div>
         </div>
       )}
       {(phase === "done" || phase === "stopped") && (
