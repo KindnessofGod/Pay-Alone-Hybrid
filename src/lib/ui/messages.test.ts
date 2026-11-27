@@ -14,4 +14,8 @@ describe("what the app says after an approval try", () => {
   it("success speaks the server's sentence, never model text", () => {
     expect(approvalMessage({ ok: true, spoken: "Simulated payment, no real money moved. 5 naira to Tunde. Receipt saved." })).toBe("Simulated payment, no real money moved. 5 naira to Tunde. Receipt saved.");
   });
+  it("a failed fingerprint says so and points to the PIN", () => {
+    expect(approvalMessage({ ok: false, reason: "bad_passkey" })).toBe("Fingerprint did not work. You can try again or type your PIN.");
+    expect(approvalMessage({ ok: false, reason: "no_pending" })).toContain("Nothing was changed");
+  });
 });

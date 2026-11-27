@@ -7,6 +7,7 @@ import { getStore, storeKind } from "../store";
 import type { Verify, VerifyAppCheck } from "./http";
 import type { PayDeps } from "./payflow";
 import { opPayDeps } from "./opdeps";
+import { storedPasskeys } from "./passkeystore";
 import { verifyAppCheckToken, verifyFirebaseIdToken } from "./tokens";
 
 export const serverReady = () => storeKind() !== "none";
@@ -40,6 +41,7 @@ export function payDeps(req: Request): PayDeps {
     store,
     baseUrl: new URL(req.url).origin,
     limitMinor: Number(process.env.VOICE_LIMIT_MINOR ?? 5_000_000),
+    passkeys: (userId) => storedPasskeys(store, userId),
     contacts: async () => DEMO_CONTACTS.map((c) => ({ ...c })),
     // SIMULATED unless the real rail is configured: no fee, nothing leaves any wallet.
     quote: async (_u, _payee, amountMinor) => ({ quoteId: `simq_${randomToken(9)}`, debit: { value: amountMinor, assetCode: "NGN", assetScale: 2 }, simulated: true }),
