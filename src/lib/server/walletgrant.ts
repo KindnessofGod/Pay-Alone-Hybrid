@@ -106,9 +106,12 @@ async function finishInner(a: {
 }): Promise<{ ok: boolean; userId?: string }> {
   const now = a.now?.() ?? Date.now();
   if (!a.state) return { ok: false };
+  // Check the hash on a non-consuming read first, so a forged callback cannot burn the real one.
+  const peek = await a.store.get<PendingRecord>("grant_pending", a.state);
+  if (!peek || now - peek.createdAt > PENDING_GRANT_TTL_MS) return { ok: false };
+  if (!a.interactRef || !a.hash || !verifyInteractionHash(a.hash, peek.clientNonce, peek.finishNonce, a.interactRef, peek.grantEndpoint)) return { ok: false, userId: peek.userId };
   const p = await a.store.take<PendingRecord>("grant_pending", a.state);
-  if (!p || now - p.createdAt > PENDING_GRANT_TTL_MS) return { ok: false };
-  if (!a.interactRef || !a.hash || !verifyInteractionHash(a.hash, p.clientNonce, p.finishNonce, a.interactRef, p.grantEndpoint)) return { ok: false, userId: p.userId };
+  if (!p) return { ok: false };
   try {
     const t = await a.wallet.continueGrant({ continueUri: p.continueUri, continueToken: open(p.continueToken), interactRef: a.interactRef });
     await saveGrant(a.store, p.userId, {

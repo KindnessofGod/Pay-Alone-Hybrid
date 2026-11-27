@@ -95,11 +95,20 @@ describe("wallet connection = spending-cap consent", () => {
     const { store, g, state, hash } = await begun();
     expect(await finishWalletConnect({ store, wallet: g, state: "nope", interactRef: "ref-1", hash, now: () => NOW })).toEqual({ ok: false });
     expect(await finishWalletConnect({ store, wallet: g, state, interactRef: "", hash, now: () => NOW })).toEqual({ ok: false });
-    // that failed try took the pending record, so the real callback is now a replay
+    // a failed try no longer burns the record; the real callback works once, then a replay fails
+    expect(await finishWalletConnect({ store, wallet: g, state, interactRef: "ref-1", hash, now: () => NOW })).toEqual({ ok: true });
     expect(await finishWalletConnect({ store, wallet: g, state, interactRef: "ref-1", hash, now: () => NOW })).toEqual({ ok: false });
     const b = await begun();
     expect(await finishWalletConnect({ store: b.store, wallet: b.g, state: b.state, interactRef: "ref-1", hash: "AAAA", now: () => NOW })).toEqual({ ok: false });
     expect(await b.store.get("grants", "u1")).toBeNull();
+  });
+
+  it("a wrong hash leaves the pending record usable; the right hash consumes it", async () => {
+    const { store, g, state, hash } = await begun();
+    expect(await finishWalletConnect({ store, wallet: g, state, interactRef: "ref-1", hash: "AAAA", now: () => NOW })).toEqual({ ok: false });
+    expect(await store.get("grant_pending", state)).not.toBeNull();
+    expect(await finishWalletConnect({ store, wallet: g, state, interactRef: "ref-1", hash, now: () => NOW })).toEqual({ ok: true });
+    expect(await store.get("grant_pending", state)).toBeNull();
   });
 
   it("a pending record older than 15 minutes is refused", async () => {
