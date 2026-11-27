@@ -20,4 +20,4 @@ Everything under `src/lib/hybrid/`, `src/lib/firebase/` and `src/app/` is new fo
 Saved contacts on screen are test data. Payments use test money only (Interledger test wallet when connected). Nothing here moves real money.
 
 ## Dependencies
-firebase (Apache-2.0), firebase-admin (Apache-2.0), next, react, react-dom (MIT), @interledger/open-payments (Apache-2.0), @simplewebauthn/browser and /server (MIT), vitest, typescript.
+firebase (Apache-2.0), firebase-admin (Apache-2.0), next, react, react-dom (MIT), @interledger/open-payments (Apache-2.0), @simplewebauthn/browser and /server (MIT), vitest, typescript, kokoro-js (Apache-2.0; runs the Kokoro-82M voice model, Apache-2.0, on the device; the model is downloaded once, about 90 MB, from Hugging Face `onnx-community/Kokoro-82M-v1.0-ONNX`; spoken text never leaves the computer).

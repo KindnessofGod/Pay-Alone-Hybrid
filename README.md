@@ -15,6 +15,7 @@ Voice payments for people who cannot use a banking screen: blind and low-vision 
 | Which path answered | `result.response.inferenceSource` | Shown on screen and spoken | `src/lib/firebase/engines.ts`, `src/app/page.tsx` |
 | Start Nano | `model.initializeDeviceModel()` on the first tap | Required user gesture | `src/lib/firebase/engines.ts` |
 | Routing policy and limit | Remote Config `routing_policy`, `voice_limit_minor` | Change routing live, or switch AI off | `src/lib/firebase/client.ts` |
+| Spoken voice (not AI Logic) | Kokoro-82M (Apache-2.0) via `kokoro-js`, **on this computer** (wasm, or WebGPU if it works); the model (~90 MB) downloads once from Hugging Face; the sentence never leaves the computer; the browser voice speaks until it is ready or if it fails | Natural voice without sending text anywhere | `src/lib/hybrid/tts.ts`, `src/lib/hybrid/ttsBrowser.ts` |
 | Protect the cloud path | App Check (reCAPTCHA v3; debug token locally) | Required for AI Logic | `src/lib/firebase/client.ts` |
 
 ## Safety design (each one has tests)

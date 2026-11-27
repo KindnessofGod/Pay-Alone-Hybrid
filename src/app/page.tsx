@@ -10,6 +10,8 @@ import { firebaseApp, firebaseConfigured, remoteSettings } from "@/lib/firebase/
 import { speechMode, type SpeechStatus } from "@/lib/hybrid/speechpolicy";
 import { firebaseEngines, lastCall, prepareOnDevice, warmUpOnDevice } from "@/lib/firebase/engines";
 import { DEMO_CONTACTS } from "@/lib/demo/contacts";
+import { speaker } from "@/lib/hybrid/ttsBrowser";
+import type { TtsStatus } from "@/lib/hybrid/tts";
 import Approve from "./Approve";
 import { takeResume, type Resume } from "@/lib/ui/resume";
 
@@ -45,7 +47,13 @@ export default function Home() {
   const [ms, setMs] = useState(0);
   const [approving, setApproving] = useState<{ payeeId: string; amountMinor: string; key: number } | null>(null);
   const [working, setWorking] = useState("");
+  const [voice, setVoice] = useState<TtsStatus>("off");
   const busy = useRef(false);
+
+  useEffect(() => {
+    setVoice(speaker.status());
+    return speaker.onStatus(setVoice);
+  }, []);
   const seq = useRef(0); // only the newest request may change the screen
 
   const speak = useCallback(async (t: string) => {
@@ -56,6 +64,7 @@ export default function Home() {
   type Settings = { policy: Policy; limitMinor: string; nano: string };
 
   async function start(greet = true): Promise<Settings> {
+    speaker.load(); // natural on-device voice: downloads in the background; the browser voice speaks until it is ready
     setWorking("Getting ready…");
     let policyNow = policy;
     let limitNow = limitMinor;
@@ -276,7 +285,7 @@ export default function Home() {
       </div>
 
       <p className="status">
-        Gemini Nano: <b>{nano}</b> · Speech recognition: <b>{speech === "local" ? "on this computer" : speech === "server" ? "Google servers" : speech}</b> · Policy: <b>{policy}</b>
+        Gemini Nano: <b>{nano}</b> · Speech recognition: <b>{speech === "local" ? "on this computer" : speech === "server" ? "Google servers" : speech}</b> · Voice: <b>{voice === "ready" ? "natural (on this computer)" : voice === "loading" ? "loading, browser voice meanwhile" : "browser"}</b> · Policy: <b>{policy}</b>
         {!firebaseConfigured() && <> · <b>Firebase not configured: plain rules only</b></>}
       </p>
       <p className="sim">Test contacts (simulated): Mama Ade, Tunde, Chidi Okafor. Test money only.</p>

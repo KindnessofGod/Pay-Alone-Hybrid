@@ -3,7 +3,7 @@
 // Otherwise Chrome's server recognition is used, and the screen says so.
 "use client";
 import { failAfter, orAfter } from "./timeout";
-import { pickVoice } from "./voice";
+import { speaker } from "./ttsBrowser";
 
 type Rec = {
   lang: string;
@@ -102,18 +102,12 @@ export function listenOnce(opts: { lang?: string; local: boolean; maxMs?: number
   });
 }
 
+/**
+ * Speaks one sentence or more. Uses the natural on-device voice (Kokoro) when it is loaded, otherwise the browser
+ * voice at once. Resolves when speech ends, or after the time limit; never throws.
+ */
 export function say(text: string): Promise<void> {
-  return new Promise((resolve) => {
-    if (typeof speechSynthesis === "undefined") return resolve();
-    speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text);
-    const voice = pickVoice(speechSynthesis.getVoices?.() ?? []);
-    if (voice) u.voice = voice;
-    u.rate = 0.95;
-    // Chrome sometimes never fires onend; never wait longer than the sentence could take.
-    const t = setTimeout(resolve, 3_000 + text.length * 120);
-    u.onend = () => { clearTimeout(t); resolve(); };
-    u.onerror = () => { clearTimeout(t); resolve(); };
-    speechSynthesis.speak(u);
-  });
+  // The browser voice can stall; the model has its own limit (tts.ts). Never wait longer than speech could take.
+  const limit = 3_000 + text.length * 120 + 8_000;
+  return orAfter(speaker.speak(text), limit, undefined);
 }
