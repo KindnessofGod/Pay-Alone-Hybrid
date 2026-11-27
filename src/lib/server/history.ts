@@ -26,9 +26,12 @@ export interface History {
 
 export async function loadHistory(store: Store, userId: string): Promise<History> {
   let rs = await store.list<Receipt>("receipts_by_user", { prefix: `${userId}|`, newestFirst: true, limit: HISTORY_RECEIPTS });
-  if (rs.length === 0) {
-    // Receipts saved before the per-person list existed: read them once the slow way, own ones only.
-    rs = (await store.list<Receipt>("receipts")).filter((r) => r.userId === userId).sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)).slice(0, HISTORY_RECEIPTS);
+  if (rs.length < HISTORY_RECEIPTS) {
+    // Receipts saved before the per-person list existed are read the slow way (own ones only) and merged,
+    // so they never disappear once newer receipts are indexed. Fine at demo scale.
+    const seen = new Set(rs.map((r) => r.id));
+    const older = (await store.list<Receipt>("receipts")).filter((r) => r.userId === userId && !seen.has(r.id));
+    rs = [...rs, ...older].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)).slice(0, HISTORY_RECEIPTS);
   }
   const receipts = rs
     .filter((r) => r.userId === userId)

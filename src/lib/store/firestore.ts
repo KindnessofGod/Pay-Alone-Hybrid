@@ -49,8 +49,13 @@ export class FirestoreStore implements Store {
       const p = docId(opts.prefix);
       q = q.where(FieldPath.documentId(), ">=", p).where(FieldPath.documentId(), "<", p + "\uf8ff");
     }
-    if (opts?.newestFirst) q = q.orderBy(FieldPath.documentId(), "desc");
-    else if (opts?.prefix) q = q.orderBy(FieldPath.documentId(), "asc");
+    if (opts?.prefix || opts?.newestFirst) q = q.orderBy(FieldPath.documentId(), "asc");
+    if (opts?.newestFirst) {
+      // Firestore cannot scan document ids in descending order, so read ascending and reverse here.
+      // Fine at demo scale (one person's receipts or activity).
+      const all = (await q.get()).docs.map((d) => d.data() as T).reverse();
+      return opts.limit !== undefined ? all.slice(0, opts.limit) : all;
+    }
     if (opts?.limit !== undefined) q = q.limit(opts.limit);
     return (await q.get()).docs.map((d) => d.data() as T);
   }

@@ -111,3 +111,16 @@ describe("history: the person's own receipts and activity", () => {
     expect(await loadHistory(new MemoryStore(), "u1")).toEqual({ ok: true, receipts: [], events: [] });
   });
 });
+
+describe("older receipts are not hidden once new ones are indexed", () => {
+  it("shows a receipt saved before the per-person list alongside a newer indexed one", async () => {
+    const store = new MemoryStore();
+    const old = { id: "rcpt_old", userId: "u1", requestId: "r0", paymentId: "p0", payeeId: "c2", payeeName: "Tunde", debit: { value: "369", assetCode: "USD", assetScale: 2 }, method: "pin", simulated: false, createdAt: "2026-11-27T20:31:00.000Z" };
+    const neu = { ...old, id: "rcpt_new", createdAt: "2026-11-27T21:00:00.000Z" };
+    await store.put("receipts", old.id, old);
+    await store.put("receipts", neu.id, neu);
+    await store.put("receipts_by_user", `u1|${String(Date.parse(neu.createdAt)).padStart(13, "0")}|${neu.id}`, neu);
+    const h = await loadHistory(store, "u1");
+    expect(h.receipts.map((r) => r.id)).toEqual(["rcpt_new", "rcpt_old"]);
+  });
+});
