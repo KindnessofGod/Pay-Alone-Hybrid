@@ -58,19 +58,22 @@ export default function Home() {
     setWorking("Getting ready…");
     let policyNow = policy;
     let limitNow = limitMinor;
+    // These checks do not depend on each other, so they run side by side; each has its own time limit.
+    const speechCheck = (async () => {
+      const sp = await localSpeechStatus();
+      return sp === "installable" ? ((await installLocalSpeech()) ? "local" : "server") : sp;
+    })();
     if (firebaseConfigured()) {
-      const s = await remoteSettings();
+      setNano("preparing");
+      const [s] = await Promise.all([remoteSettings(), prepareOnDevice((p) => setNano(`downloading ${Math.round(p * 100)}%`))]);
       policyNow = s.policy;
       limitNow = s.limitMinor;
       setPolicy(s.policy);
       setLimitMinor(s.limitMinor);
-      setNano("preparing");
-      await prepareOnDevice((p) => setNano(`downloading ${Math.round(p * 100)}%`));
     }
     const nanoNow = await nanoAvailability();
     setNano(nanoNow);
-    let sp = await localSpeechStatus();
-    if (sp === "installable") sp = (await installLocalSpeech()) ? "local" : "server";
+    const sp = await speechCheck;
     setSpeech(sp);
     setReady(true);
     setWorking("");

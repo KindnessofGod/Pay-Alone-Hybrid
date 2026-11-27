@@ -40,8 +40,8 @@ export async function localSpeechStatus(lang = "en-US"): Promise<"local" | "inst
 export async function installLocalSpeech(lang = "en-US"): Promise<boolean> {
   const C = ctor();
   try {
-    // The pack may keep downloading in the background; we do not wait more than 10 seconds for it.
-    return Boolean(C?.install && (await orAfter(C.install({ langs: [lang], processLocally: true }), 10_000, false)));
+    // The pack may keep downloading in the background; we do not wait more than 5 seconds for it.
+    return Boolean(C?.install && (await orAfter(C.install({ langs: [lang], processLocally: true }), 5_000, false)));
   } catch {
     return false;
   }

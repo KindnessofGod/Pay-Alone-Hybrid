@@ -79,7 +79,7 @@ export function helpModel(): GenerativeModel {
 export async function prepareOnDevice(onProgress?: (p: number) => void): Promise<boolean> {
   try {
     // The model is usually already on the computer; if Chrome stalls, carry on without it.
-    return await orAfter(onDevice().initializeDeviceModel(onProgress).then(() => true), 30_000, false);
+    return await orAfter(onDevice().initializeDeviceModel(onProgress).then(() => true), 8_000, false);
   } catch {
     return false;
   }
