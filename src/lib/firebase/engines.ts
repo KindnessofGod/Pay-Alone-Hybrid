@@ -8,6 +8,7 @@ import { failAfter, orAfter } from "../hybrid/timeout";
 import { getGenerativeModel, InferenceMode, InferenceSource, Schema, type GenerativeModel } from "firebase/ai";
 import { firebaseAI } from "./client";
 import type { Engines } from "../hybrid/understand";
+import type { ChatEngines } from "../hybrid/chat";
 import { oneAtATime } from "../hybrid/serial";
 
 export const CLOUD_MODEL = "gemini-3.5-flash-lite";
@@ -44,6 +45,8 @@ export const INSTRUCTION =
 const prompt = (said: string) => `${INSTRUCTION}\nSentence: ${said}\nJSON:`;
 
 let onDeviceModel: GenerativeModel | undefined;
+let chatOnDeviceModel: GenerativeModel | undefined;
+let chatCloudModel: GenerativeModel | undefined;
 let cloudModel: GenerativeModel | undefined;
 
 function onDevice(): GenerativeModel {
@@ -70,6 +73,26 @@ function cloud(): GenerativeModel {
   return cloudModel;
 }
 
+/** Open conversation, on the device: plain text out (no JSON schema). Nano's own settings are used. */
+function chatOnDevice(): GenerativeModel {
+  if (!chatOnDeviceModel)
+    chatOnDeviceModel = getGenerativeModel(firebaseAI(), {
+      mode: InferenceMode.ONLY_ON_DEVICE,
+      onDeviceParams: { createOptions: { expectedInputs: [{ type: "text", languages: ["en"] }], expectedOutputs: [{ type: "text", languages: ["en"] }] } },
+    });
+  return chatOnDeviceModel;
+}
+
+/** Open conversation, in the cloud: plain text, a little creative. It only ever receives redacted text (chat.ts). */
+function chatCloud(): GenerativeModel {
+  if (!chatCloudModel)
+    chatCloudModel = getGenerativeModel(firebaseAI(), {
+      mode: InferenceMode.ONLY_IN_CLOUD,
+      inCloudParams: { model: CLOUD_MODEL, generationConfig: { temperature: 0.6, maxOutputTokens: 160 } },
+    });
+  return chatCloudModel;
+}
+
 /** Help questions carry no personal data, so the SDK's own hybrid fallback is safe here. */
 export function helpModel(): GenerativeModel {
   return getGenerativeModel(firebaseAI(), { mode: InferenceMode.PREFER_ON_DEVICE, inCloudParams: { model: CLOUD_MODEL } });
@@ -91,22 +114,28 @@ export interface LastCall {
 }
 export const lastCall: LastCall = { ms: 0 };
 
-async function run(model: GenerativeModel, said: string): Promise<unknown> {
+async function run(model: GenerativeModel, text: string): Promise<string> {
   const t0 = performance.now();
-  const result = await model.generateContent(prompt(said));
+  const result = await model.generateContent(text);
   lastCall.ms = Math.round(performance.now() - t0);
   lastCall.source = result.response.inferenceSource;
   return result.response.text();
 }
 
-// One on-device call at a time: the SDK destroys the previous Chrome session when it starts a new one.
-const onDeviceOnce = oneAtATime(async (said: string) => {
-  // On a CPU-only PC the first answer includes loading the model into memory; warmUpOnDevice() does that early.
-  const out = await failAfter(run(onDevice(), said), 30_000, "Gemini Nano");
-  // Honesty guard: only count an answer as on-device if the SDK says it ran on the device.
-  if (lastCall.source !== InferenceSource.ON_DEVICE) throw new Error("not answered on device");
-  return out;
-});
+// One on-device call at a time, intent and chat alike: the SDK destroys the previous Chrome session when it
+// starts a new one.
+const onDeviceQueue = oneAtATime(<T>(job: () => Promise<T>) => job());
+
+async function onDeviceCall(model: GenerativeModel, text: string, ms: number): Promise<string> {
+  return onDeviceQueue(async () => {
+    // On a CPU-only PC the first answer includes loading the model into memory; warmUpOnDevice() does that early.
+    const out = await failAfter(run(model, text), ms, "Gemini Nano");
+    // Honesty guard: only count an answer as on-device if the SDK says it ran on the device.
+    if (lastCall.source !== InferenceSource.ON_DEVICE) throw new Error("not answered on device");
+    return out;
+  });
+}
+const onDeviceOnce = (said: string) => onDeviceCall(onDevice(), prompt(said), 30_000);
 
 /** Loads Gemini Nano into memory right after Start, with a made-up sentence, so the person's first request is fast. */
 export function warmUpOnDevice(): Promise<boolean> {
@@ -118,5 +147,16 @@ export function warmUpOnDevice(): Promise<boolean> {
 
 export const firebaseEngines: Engines = {
   onDevice: onDeviceOnce,
-  cloud: (said) => failAfter(run(cloud(), said), 10_000, "The online model"),
+  cloud: (said) => failAfter(run(cloud(), prompt(said)), 10_000, "The online model"),
+};
+
+/** The open conversation. The prompt already holds the persona and history (chat.ts); the cloud one is redacted there. */
+export const chatEngines: ChatEngines = {
+  onDevice: (text) => onDeviceCall(chatOnDevice(), text, 20_000),
+  cloud: async (text) => {
+    const out = await failAfter(run(chatCloud(), text), 10_000, "The online model");
+    // Honesty guard: only count it as online if the SDK says so.
+    if (lastCall.source !== InferenceSource.IN_CLOUD) throw new Error("not answered online");
+    return out;
+  },
 };

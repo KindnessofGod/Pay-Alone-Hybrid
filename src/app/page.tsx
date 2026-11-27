@@ -8,10 +8,11 @@ import { nanoAvailability } from "@/lib/hybrid/device";
 import { installLocalSpeech, listenOnce, localSpeechStatus, say, stopListening } from "@/lib/hybrid/listen";
 import { firebaseApp, firebaseConfigured, remoteSettings } from "@/lib/firebase/client";
 import { speechMode, type SpeechStatus } from "@/lib/hybrid/speechpolicy";
-import { firebaseEngines, lastCall, prepareOnDevice, warmUpOnDevice } from "@/lib/firebase/engines";
+import { chatEngines, firebaseEngines, lastCall, prepareOnDevice, warmUpOnDevice } from "@/lib/firebase/engines";
 import { DEMO_CONTACTS } from "@/lib/demo/contacts";
 import { speaker } from "@/lib/hybrid/ttsBrowser";
 import type { TtsStatus } from "@/lib/hybrid/tts";
+import { chatReply, type ChatTurn } from "@/lib/hybrid/chat";
 import { afterPayment, initialDialog, next as dialogNext, silence, type DialogState } from "@/lib/hybrid/dialog";
 import Approve from "./Approve";
 import { takeResume, type Resume } from "@/lib/ui/resume";
@@ -33,7 +34,8 @@ export default function Home() {
   const [policy, setPolicy] = useState<Policy>("on_device_first");
   const [limitMinor, setLimitMinor] = useState("5000000");
   const [listening, setListening] = useState(false);
-  const [turns, setTurns] = useState<{ who: "you" | "app"; text: string }[]>([]);
+  type Turn = { who: "you" | "app"; text: string; ai?: "on_device" | "cloud"; sent?: string };
+  const [turns, setTurns] = useState<Turn[]>([]);
   const [typed, setTyped] = useState("");
   const [result, setResult] = useState<Understood | null>(null);
   const [ms, setMs] = useState(0);
@@ -45,8 +47,11 @@ export default function Home() {
   const lastInput = useRef<"voice" | "typed">("typed"); // hands-free loop only when the person is using the mic
   const inputBox = useRef<HTMLInputElement>(null);
   const talkRef = useRef<(auto?: boolean) => Promise<void>>(async () => undefined);
-  const addTurn = useCallback((who: "you" | "app", text: string) => {
-    if (text) setTurns((t) => [...t, { who, text }].slice(-6));
+  const history = useRef<ChatTurn[]>([]); // what the open conversation may see (chat.ts drops secrets and keeps the last few)
+  const addTurn = useCallback((who: "you" | "app", text: string, ai?: { source: "on_device" | "cloud"; sent?: string }) => {
+    if (!text) return;
+    history.current = [...history.current, { who, text }].slice(-12);
+    setTurns((t) => [...t, { who, text, ...(ai ? { ai: ai.source, sent: ai.sent } : {}) }].slice(-6));
   }, []);
 
   useEffect(() => {
@@ -139,13 +144,41 @@ export default function Home() {
       setResult(r);
       // The conversation decides what to say next. Its lines are fixed templates; it never approves anything.
       const o = dialogNext(dialog.current, r, { contacts: CONTACTS, said, limitMinor: c.limitMinor });
+      // Open conversation: where the dialog only has a fallback line, the AI may answer in its own words.
+      // Its text is guarded (chat.ts safeReply) and only ever spoken; it never changes the payee or amount.
+      let ai: { source: "on_device" | "cloud"; sent?: string } | undefined;
+      if (o.chat && c.policy !== "ai_off") {
+        setWorking("Thinking…");
+        try {
+          const cr = await chatReply(history.current, said, { contacts: CONTACTS, policy: c.policy, deviceAvailable: c.nano === "available" || c.nano === "warming up" }, {
+            onDevice: (x) => (setWorking("Thinking on this computer (Gemini Nano)…"), chatEngines.onDevice(x)),
+            cloud: (x) => (setWorking("Asking online, with names and amounts hidden…"), chatEngines.cloud(x)),
+          });
+          if (my !== seq.current) return false;
+          if (cr.kind === "reply") {
+            setMs(lastCall.ms);
+            if (!cr.guarded) {
+              o.state = o.chat.state; // a real answer is not a miss
+              o.say = `${cr.text}${o.chat.suffix ? ` ${o.chat.suffix}` : ""}`;
+              o.then = o.chat.then;
+              ai = { source: cr.source, sent: cr.sentToCloud };
+            } else if (o.then === "listen") {
+              o.say = cr.text; // the fixed safe line; the miss still counts
+            }
+          }
+        } catch {
+          // chat is optional: keep the fixed line
+        }
+        if (my !== seq.current) return false;
+        setWorking("");
+      }
       dialog.current = o.state;
       addTurn("you", r.kind === "secret_spoken" ? "(deleted)" : said);
       if (o.then === "approve" && o.approve) {
         setApproving({ ...o.approve, key: Date.now() });
         return false;
       }
-      addTurn("app", o.say);
+      addTurn("app", o.say, ai);
       await speak(o.say);
       if (my !== seq.current) return false; // the person typed or pressed something while it was speaking
       if (o.then === "listen") {
@@ -280,6 +313,8 @@ export default function Home() {
               {turns.map((t, i) => (
                 <li key={i}>
                   <b>{t.who === "you" ? "You:" : "Pay Alone:"}</b> {t.text}
+                  {t.ai && <span className={`badge ${t.ai}`}> {t.ai === "on_device" ? "on this computer" : "online, names and amounts hidden"}</span>}
+                  {t.ai === "cloud" && t.sent && <p className="status">What the cloud received: <code>{t.sent}</code></p>}
                 </li>
               ))}
             </ol>

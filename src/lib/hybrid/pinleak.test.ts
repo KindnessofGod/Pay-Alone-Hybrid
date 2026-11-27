@@ -73,3 +73,48 @@ describe("PIN-leak test: the conversation never speaks or keeps a spoken PIN or 
     }
   });
 });
+
+describe("PIN-leak test: open conversation (chat.ts)", () => {
+  const PINS = ["my pin is 4826", "send 5000 to Tunde my pin is four eight two six", "pin 4 8 2 6", "the code na 4826"];
+  it.each(PINS)("a spoken PIN never reaches either chat engine: %s", async (said) => {
+    const { chatReply } = await import("./chat");
+    const calls: string[] = [];
+    const engines = { onDevice: vi.fn(async (p: string) => (calls.push(p), "ok")), cloud: vi.fn(async (p: string) => (calls.push(p), "ok")) };
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    for (const policy of ["on_device_first", "cloud_only", "ai_off"] as const) {
+      const r = await chatReply([], said, { contacts, policy, deviceAvailable: true }, engines);
+      expect(r.kind).toBe("secret_spoken");
+      expect(JSON.stringify(r)).not.toMatch(/4826|four eight two six|4 8 2 6/i);
+    }
+    expect(calls).toEqual([]);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+  it.each(PINS)("a PIN already in the history is dropped before both engines: %s", async (pinLine) => {
+    const { chatReply } = await import("./chat");
+    const seen: string[] = [];
+    const engines = {
+      onDevice: async (p: string) => { seen.push(p); throw new Error("no nano"); },
+      cloud: async (p: string) => (seen.push(p), "Hello, friend."),
+    };
+    const history = [{ who: "you" as const, text: pinLine }, { who: "app" as const, text: "Your PIN is 4826 and 4 8 2 6" }, { who: "you" as const, text: "hello" }];
+    const r = await chatReply(history, "how are you today", { contacts, policy: "on_device_first", deviceAvailable: true }, engines);
+    expect(r.kind).toBe("reply");
+    expect(seen.length).toBe(2);
+    for (const p of seen) expect(p).not.toMatch(/4826|four eight two six|4\s8\s2\s6|pin is/i);
+    expect(JSON.stringify(r)).not.toMatch(/4826|four eight two six|4 8 2 6/i);
+  });
+  it("a model that echoes a PIN is never shown or spoken", async () => {
+    const { chatReply, SAFE_FALLBACK } = await import("./chat");
+    const engines = { onDevice: async () => "Your PIN 4826 is wrong, try 4 8 2 6 or four eight two six.", cloud: async () => "x" };
+    const r = await chatReply([], "hello how are you", { contacts, policy: "on_device_first", deviceAvailable: true }, engines);
+    expect(r).toMatchObject({ kind: "reply", text: SAFE_FALLBACK, guarded: true });
+  });
+  it("chat engines never log", async () => {
+    const { chatReply } = await import("./chat");
+    const spies = [vi.spyOn(console, "log"), vi.spyOn(console, "warn"), vi.spyOn(console, "error")];
+    await chatReply([], "my pin is 4826", { contacts, policy: "on_device_first", deviceAvailable: true }, { onDevice: async () => "x", cloud: async () => "x" });
+    for (const s of spies) for (const c of s.mock.calls) expect(JSON.stringify(c)).not.toMatch(/4826/);
+  });
+});

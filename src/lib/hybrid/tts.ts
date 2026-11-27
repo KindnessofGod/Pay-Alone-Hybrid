@@ -36,8 +36,8 @@ export function splitSentences(text: string): string[] {
 }
 
 const D = "(?:zero|oh|one|two|three|four|five|six|seven|eight|nine|\\d)";
-const SPELLED_RUN = new RegExp(`\\b${D}(?:[\\s,-]+${D}\\b){3,}`, "i"); // "4 8 2 6", "four eight two six"
-const LONG_NUMBER = /\b\d{4,}\b(?!\s*(?:naira|dollars?|cents?|kobo|k)\b)/i; // "4826" but not "5000 naira"
+export const SPELLED_RUN = new RegExp(`\\b${D}(?:[\\s,-]+${D}\\b){3,}`, "i"); // "4 8 2 6", "four eight two six"
+export const LONG_NUMBER = /\b\d{4,}\b(?!\s*(?:naira|dollars?|cents?|kobo|k)\b)/i; // "4826" but not "5000 naira"
 
 /**
  * True when speaking this text could say out loud a PIN, code or card number. The tripwire decides first; then, for

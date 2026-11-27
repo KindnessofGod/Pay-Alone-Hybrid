@@ -273,3 +273,55 @@ describe("dialog: safety", () => {
     ]);
   });
 });
+
+describe("dialog: open conversation hooks (chat is offered only where the fixed line is a plain fallback)", () => {
+  it("greeting: fixed line stays the fallback; chat state has no miss", () => {
+    const o = next(initialDialog(), unclear, ctx("hello"));
+    expect(o.then).toBe("listen");
+    expect(o.chat).toBeDefined();
+    expect(o.chat!.suffix).toBe("");
+    expect(o.chat!.state.misses).toBe(0);
+  });
+  it("help intent and help words offer chat, fallback is the fixed help", () => {
+    const o = next(initialDialog(), intent("help"), ctx("what can you do"));
+    expect(o.chat).toBeDefined();
+    expect(o.say).toMatch(/I can send money/);
+  });
+  it("balance and history (coming soon) offer chat and keep asked=more in both", () => {
+    const o = next(initialDialog(), intent("balance"), ctx("how much do I have"));
+    expect(o.say).toMatch(/coming soon/);
+    expect(o.chat!.state.asked).toBe("more");
+  });
+  it("not understood: fixed fallback counts a miss, an AI answer does not", () => {
+    const o = next(initialDialog(), unclear, ctx("what is the weather like"));
+    expect(o.state.misses).toBe(1);
+    expect(o.chat!.state.misses).toBe(0);
+  });
+  it("the 3rd miss still falls back to typing, but chat can answer and reset", () => {
+    const s: DialogState = { ...initialDialog(), misses: 2 };
+    const o = next(s, unclear, ctx("tell me a story please"));
+    expect(o.then).toBe("idle");
+    expect(o.chat!.state.misses).toBe(0);
+    expect(o.chat!.then).toBe("listen");
+  });
+  it("mid-payment: the question is re-asked after a chat answer, and slots are kept", () => {
+    const s: DialogState = { ...initialDialog(), payeeId: "c2", asked: "amount" };
+    const o = next(s, unclear, ctx("why do I need a pin"));
+    expect(o.chat!.suffix).toBe("How much would you like to send to Tunde?");
+    expect(o.chat!.state.payeeId).toBe("c2");
+    expect(o.chat!.state.asked).toBe("amount");
+  });
+  it("never offers chat for cancel, secret, rejections, proposals, repeat or anything with an amount", () => {
+    expect(next(initialDialog(), unclear, ctx("cancel")).chat).toBeUndefined();
+    expect(next(initialDialog(), secret, ctx("my pin is 4826")).chat).toBeUndefined();
+    expect(next(initialDialog(), rejected("unknown_payee"), ctx("send 500 to Bola")).chat).toBeUndefined();
+    expect(next(initialDialog(), rejected("over_limit"), ctx("send 90000000 to Tunde")).chat).toBeUndefined();
+    expect(next(initialDialog(), rejected("no_amount"), ctx("send to Tunde")).chat).toBeUndefined();
+    expect(next(initialDialog(), proposal("c2", "500000"), ctx("send 5000 to Tunde")).chat).toBeUndefined();
+    expect(next(initialDialog(), intent("repeat"), ctx("say that again")).chat).toBeUndefined();
+    expect(next(initialDialog(), unclear, ctx("I have 5000 naira, what now")).chat).toBeUndefined();
+    expect(next(initialDialog(), unclear, ctx("I have two thousand naira")).chat).toBeUndefined();
+    expect(afterPayment(initialDialog(), "paid")).not.toHaveProperty("chat");
+    expect(next({ ...initialDialog(), asked: "more" }, unclear, ctx("no")).chat).toBeUndefined();
+  });
+});

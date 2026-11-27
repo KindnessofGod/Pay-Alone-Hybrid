@@ -38,6 +38,13 @@ export interface DialogOut {
   say: string;
   then: "listen" | "approve" | "idle";
   approve?: { payeeId: string; amountMinor: string };
+  /**
+   * Set only where `say` is a plain fallback line (greeting, help, balance/history, not understood) and the
+   * message carries no amount. If the open-conversation AI gives a guarded answer, the screen speaks that
+   * (plus `suffix`, the fixed question to re-ask mid-payment) and uses this state and `then`; otherwise it
+   * speaks `say` and uses `state`. The AI answer is only words: it never changes the payee or amount.
+   */
+  chat?: { state: DialogState; suffix: string; then: "listen" };
 }
 
 export const initialDialog = (): DialogState => ({ asked: "none", misses: 0, silent: 0 });
@@ -106,6 +113,9 @@ const NOT_UNDERSTOOD = (cs: Contact[], n: number) =>
     ? `Sorry, I didn't catch that. You can say, for example, send five thousand naira to ${cs[0]?.name ?? "someone"}.`
     : `Let's try once more. Say who to pay and how much, like, pay ${cs[1]?.name ?? cs[0]?.name ?? "someone"} two thousand naira.`;
 
+/** Any digit or number word: lines that carry an amount stay fixed and are never sent to the chat AI. */
+const carriesAmount = (said: string) => /\d/.test(numberWordsToDigits(said.normalize("NFKC").toLowerCase()));
+
 const CANCEL_WORDS = /\b(cancel|stop|never ?mind|forget it)\b/i;
 const HELP_WORDS = /\b(help|what can you do|how does this work|what do i say)\b/i;
 const GREETING_RE = /^\s*(hello|hi|hey|howdy|good (morning|afternoon|evening))( there| pay alone)?[\s.,!?]*$/i;
@@ -121,6 +131,14 @@ export function next(state: DialogState, u: Understood, input: DialogContext): D
   const s: DialogState = { ...state, silent: 0 };
   const out = (st: DialogState, say: string, then: DialogOut["then"], approve?: DialogOut["approve"]): DialogOut => ({ state: st, say, then, ...(approve ? { approve } : {}) });
   const fresh = (): DialogState => ({ ...clear(s), misses: 0 });
+  // Offer the chat AI for a fallback line. `chatState` is what the dialog becomes if the AI answers.
+  const chatable = u.kind !== "rejected" && !carriesAmount(said);
+  const withChat = (o: DialogOut, chatState: DialogState): DialogOut => {
+    if (!chatable) return o;
+    const pendingNow = Boolean(chatState.payeeId || chatState.amountMinor);
+    const suffix = pendingNow ? question(chatState, contacts).say : "";
+    return { ...o, chat: { state: chatState, suffix, then: "listen" } };
+  };
 
   if (u.kind === "secret_spoken") return out(fresh(), STOP_SECRET, "listen");
 
@@ -131,14 +149,14 @@ export function next(state: DialogState, u: Understood, input: DialogContext): D
   }
   const pending = Boolean(s.payeeId || s.amountMinor);
   if (CANCEL_WORDS.test(said) || (u.kind === "intent" && u.action === "cancel")) return out(fresh(), CANCELLED, "idle");
-  if (HELP_WORDS.test(said) || (u.kind === "intent" && u.action === "help")) return out({ ...s, misses: 0 }, HELP(contacts), "listen");
-  if (!pending && u.kind === "unclear" && GREETING_RE.test(said)) return out({ ...s, asked: "none", misses: 0 }, GREETING, "listen");
+  if (HELP_WORDS.test(said) || (u.kind === "intent" && u.action === "help")) return withChat(out({ ...s, misses: 0 }, HELP(contacts), "listen"), { ...s, misses: 0 });
+  if (!pending && u.kind === "unclear" && GREETING_RE.test(said)) return withChat(out({ ...s, asked: "none", misses: 0 }, GREETING, "listen"), { ...s, asked: "none", misses: 0 });
   if (answer === "no") return out(fresh(), CANCELLED, "idle");
 
   if (u.kind === "proposal") return out(fresh(), "", "approve", { payeeId: u.proposal.payeeId, amountMinor: u.proposal.amountMinor });
 
   if (u.kind === "intent") {
-    if (u.action === "balance" || u.action === "history") return out({ ...s, asked: "more", misses: 0 }, SOON, "listen");
+    if (u.action === "balance" || u.action === "history") return withChat(out({ ...s, asked: "more", misses: 0 }, SOON, "listen"), { ...s, asked: "more", misses: 0 });
     if (u.action === "repeat") {
       const q = question(s, contacts);
       return out({ ...s, asked: q.asked }, q.say, "listen");
@@ -177,11 +195,13 @@ export function next(state: DialogState, u: Understood, input: DialogContext): D
 
   // Not understood.
   const misses = s.misses + 1;
-  if (misses >= 3) return out({ ...s, misses: 0 }, TYPING, "idle");
+  if (misses >= 3) return withChat(out({ ...s, misses: 0 }, TYPING, "idle"), { ...s, misses: 0 });
   const q = question(s, contacts);
   const open = s.payeeId || s.amountMinor || s.asked === "payee" || s.asked === "amount";
   const say = open ? `${misses === 1 ? "Sorry, I didn't catch that." : "I still didn't get that."} ${q.say}` : NOT_UNDERSTOOD(contacts, misses);
-  return out({ ...s, misses, asked: open ? q.asked : "none" }, say, "listen");
+  const asked = open ? q.asked : "none";
+  // If the AI answers, it is not a miss; keep what was asked so the question is re-asked after the answer.
+  return withChat(out({ ...s, misses, asked }, say, "listen"), { ...s, misses: 0, asked });
 }
 
 /** Nothing was heard. The first time, ask again; the second time, wait for the button. */
