@@ -48,7 +48,7 @@ export async function recordClientEvent(store: Store, userId: string, body: Reco
   try {
     ok = await allow(store, userId, now);
   } catch {
-    ok = true; // the limiter itself failing must not hide the event
+    ok = false; // fail closed: if the limiter cannot count, the event is dropped
   }
   if (!ok) throw new HttpError(429, "rate_limited");
   await audit(store, userId, v.event, v.fields, now);

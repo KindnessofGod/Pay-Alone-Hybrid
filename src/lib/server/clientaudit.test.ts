@@ -124,3 +124,12 @@ describe("older receipts are not hidden once new ones are indexed", () => {
     expect(h.receipts.map((r) => r.id)).toEqual(["rcpt_new", "rcpt_old"]);
   });
 });
+
+describe("client event limiter fails closed", () => {
+  it("a limiter that throws drops the event", async () => {
+    const store = new MemoryStore();
+    vi.spyOn(store, "update").mockRejectedValue(new Error("down"));
+    await expect(recordClientEvent(store, "u1", { event: "app_start" })).rejects.toMatchObject({ status: 429 });
+    expect((await store.list("audit")).length).toBe(0);
+  });
+});
