@@ -43,6 +43,7 @@ export default function Home() {
   const [spoken, setSpoken] = useState("");
   const [ms, setMs] = useState(0);
   const [approving, setApproving] = useState<{ payeeId: string; amountMinor: string; key: number } | null>(null);
+  const [working, setWorking] = useState("");
   const busy = useRef(false);
   const seq = useRef(0); // only the newest request may change the screen
 
@@ -54,6 +55,7 @@ export default function Home() {
   type Settings = { policy: Policy; limitMinor: string; nano: string };
 
   async function start(greet = true): Promise<Settings> {
+    setWorking("Getting ready…");
     let policyNow = policy;
     let limitNow = limitMinor;
     if (firebaseConfigured()) {
@@ -71,6 +73,7 @@ export default function Home() {
     if (sp === "installable") sp = (await installLocalSpeech()) ? "local" : "server";
     setSpeech(sp);
     setReady(true);
+    setWorking("");
     if (greet) await speak("Pay Alone is ready. Press the big button or the space bar, then say who to pay and how much.");
     return { policy: policyNow, limitMinor: limitNow, nano: nanoNow };
   }
@@ -79,8 +82,12 @@ export default function Home() {
   async function submitTyped() {
     if (!typed) return;
     stopListening(); // typing wins over a microphone that is still open
-    const s = ready ? undefined : await start(false);
-    await handle(typed, s);
+    try {
+      const s = ready ? undefined : await start(false);
+      await handle(typed, s);
+    } catch {
+      setWorking("Something went wrong. Please try again.");
+    }
   }
 
   const handle = useCallback(
@@ -89,8 +96,18 @@ export default function Home() {
       setApproving(null);
       const c = now ?? { policy, limitMinor, nano };
       const my = ++seq.current;
-      const r = await understand(said, { contacts: CONTACTS, limitMinor: c.limitMinor, policy: c.policy, deviceAvailable: c.nano === "available" }, firebaseEngines);
+      setWorking("Working on it…");
+      let r: Understood;
+      try {
+        r = await understand(said, { contacts: CONTACTS, limitMinor: c.limitMinor, policy: c.policy, deviceAvailable: c.nano === "available" }, firebaseEngines);
+      } catch {
+        if (my !== seq.current) return;
+        setWorking("Something went wrong. Please try again.");
+        await speak("Something went wrong. Please try again.");
+        return;
+      }
       if (my !== seq.current) return; // a newer request started while this one ran
+      setWorking("");
       setMs(lastCall.ms);
       if (r.kind === "secret_spoken") {
         setHeard("(deleted)");
@@ -159,7 +176,7 @@ export default function Home() {
       <p className="tag">Speak it. Approve it. The AI is never allowed to move your money.</p>
 
       {!ready ? (
-        <button className="big" onClick={() => void start()}>
+        <button className="big" onClick={() => void start().catch(() => setWorking("Something went wrong while starting. Please reload the page."))}>
           Start
         </button>
       ) : (
@@ -184,6 +201,7 @@ export default function Home() {
 
       <div aria-live="polite">
         {walletNote && <p className="status">{walletNote}</p>}
+        {working && <p className="status">{working}</p>}
         {result && (
           <div className="card">
             <p className="status">You said: <b>{heard}</b></p>

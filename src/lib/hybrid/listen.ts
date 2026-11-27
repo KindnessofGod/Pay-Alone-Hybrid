@@ -2,6 +2,7 @@
 // (SpeechRecognition.processLocally, Chrome 139+), the voice never leaves the computer.
 // Otherwise Chrome's server recognition is used, and the screen says so.
 "use client";
+import { failAfter, orAfter } from "./timeout";
 
 type Rec = {
   lang: string;
@@ -29,7 +30,7 @@ export async function localSpeechStatus(lang = "en-US"): Promise<"local" | "inst
   if (!C) return "none";
   if (!C.available) return "server";
   try {
-    const a = await C.available({ langs: [lang], processLocally: true });
+    const a = await failAfter(C.available({ langs: [lang], processLocally: true }), 5_000, "Speech check");
     return a === "available" ? "local" : a === "unavailable" ? "server" : "installable";
   } catch {
     return "server";
@@ -39,7 +40,8 @@ export async function localSpeechStatus(lang = "en-US"): Promise<"local" | "inst
 export async function installLocalSpeech(lang = "en-US"): Promise<boolean> {
   const C = ctor();
   try {
-    return Boolean(C?.install && (await C.install({ langs: [lang], processLocally: true })));
+    // The pack may keep downloading in the background; we do not wait more than 10 seconds for it.
+    return Boolean(C?.install && (await orAfter(C.install({ langs: [lang], processLocally: true }), 10_000, false)));
   } catch {
     return false;
   }
@@ -90,8 +92,10 @@ export function say(text: string): Promise<void> {
     speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(text);
     u.rate = 0.9;
-    u.onend = () => resolve();
-    u.onerror = () => resolve();
+    // Chrome sometimes never fires onend; never wait longer than the sentence could take.
+    const t = setTimeout(resolve, 3_000 + text.length * 120);
+    u.onend = () => { clearTimeout(t); resolve(); };
+    u.onerror = () => { clearTimeout(t); resolve(); };
     speechSynthesis.speak(u);
   });
 }

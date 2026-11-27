@@ -1,6 +1,7 @@
 // Firebase in the browser: app, App Check, Firebase AI Logic (hybrid), Remote Config.
 // Config comes from NEXT_PUBLIC_* build variables, never from the repo.
 "use client";
+import { failAfter } from "../hybrid/timeout";
 import { getApps, initializeApp, type FirebaseApp } from "firebase/app";
 import { getToken, initializeAppCheck, ReCaptchaEnterpriseProvider, ReCaptchaV3Provider, type AppCheck } from "firebase/app-check";
 import { getAI, GoogleAIBackend, type AI } from "firebase/ai";
@@ -52,7 +53,7 @@ export async function remoteSettings(): Promise<{ policy: Policy; limitMinor: st
     const rc = getRemoteConfig(firebaseApp());
     rc.settings.minimumFetchIntervalMillis = 30_000;
     rc.defaultConfig = { routing_policy: defaults.policy, voice_limit_minor: defaults.limitMinor };
-    await fetchAndActivate(rc);
+    await failAfter(fetchAndActivate(rc), 5_000, "Remote Config");
     const p = getValue(rc, "routing_policy").asString() as Policy;
     const l = getValue(rc, "voice_limit_minor").asString();
     return { policy: POLICIES.includes(p) ? p : defaults.policy, limitMinor: /^\d+$/.test(l) ? l : defaults.limitMinor };

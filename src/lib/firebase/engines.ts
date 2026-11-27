@@ -4,6 +4,7 @@
 // cloud), so the fallback is ours (understand.ts), not the SDK's. PREFER_ON_DEVICE is used for help
 // questions, which carry no personal data (see helpModel).
 "use client";
+import { failAfter, orAfter } from "../hybrid/timeout";
 import { getGenerativeModel, InferenceMode, InferenceSource, Schema, type GenerativeModel } from "firebase/ai";
 import { firebaseAI } from "./client";
 import type { Engines } from "../hybrid/understand";
@@ -77,8 +78,8 @@ export function helpModel(): GenerativeModel {
 /** Must run on a user gesture (first tap). Starts or finishes the Gemini Nano download. */
 export async function prepareOnDevice(onProgress?: (p: number) => void): Promise<boolean> {
   try {
-    await onDevice().initializeDeviceModel(onProgress);
-    return true;
+    // The model is usually already on the computer; if Chrome stalls, carry on without it.
+    return await orAfter(onDevice().initializeDeviceModel(onProgress).then(() => true), 30_000, false);
   } catch {
     return false;
   }
@@ -100,7 +101,7 @@ async function run(model: GenerativeModel, said: string): Promise<unknown> {
 
 // One on-device call at a time: the SDK destroys the previous Chrome session when it starts a new one.
 const onDeviceOnce = oneAtATime(async (said: string) => {
-  const out = await run(onDevice(), said);
+  const out = await failAfter(run(onDevice(), said), 15_000, "Gemini Nano");
   // Honesty guard: only count an answer as on-device if the SDK says it ran on the device.
   if (lastCall.source !== InferenceSource.ON_DEVICE) throw new Error("not answered on device");
   return out;
@@ -108,5 +109,5 @@ const onDeviceOnce = oneAtATime(async (said: string) => {
 
 export const firebaseEngines: Engines = {
   onDevice: onDeviceOnce,
-  cloud: (said) => run(cloud(), said),
+  cloud: (said) => failAfter(run(cloud(), said), 15_000, "The online model"),
 };
