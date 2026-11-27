@@ -20,6 +20,8 @@ interface Props {
   listen: (() => Promise<string>) | null; // null when the mic is off for privacy
   /** "paid" after a receipt; "stopped" after a cancel, a stop or Not now. */
   onClose(outcome: "paid" | "stopped"): void;
+  /** Called the moment the server has saved a receipt, before the person closes the card. */
+  onPaid?(): void;
 }
 
 interface Receipt {
@@ -38,7 +40,7 @@ function alreadyDeclined(): boolean {
   }
 }
 
-export default function Approve({ payeeId, amountMinor, speak, listen, onClose }: Props) {
+export default function Approve({ payeeId, amountMinor, speak, listen, onClose, onPaid }: Props) {
   const [phase, setPhase] = useState<Phase>("starting");
   const [pin, setPin] = useState("");
   const [firstPin, setFirstPin] = useState("");
@@ -150,6 +152,7 @@ export default function Approve({ payeeId, amountMinor, speak, listen, onClose }
     if (r.ok) {
       req.current = null;
       setReceipt(r.receipt);
+      onPaid?.();
       setPhase("done");
       await tell(r.spoken);
       if (!hasPasskey && fingerprintAvailable() && !alreadyDeclined()) {
@@ -188,6 +191,7 @@ export default function Approve({ payeeId, amountMinor, speak, listen, onClose }
     if (r.ok) {
       req.current = null;
       setReceipt(r.receipt);
+      onPaid?.();
       setPhase("done");
       return void tell(r.spoken);
     }

@@ -29,6 +29,7 @@ Voice payments for people who cannot use a banking screen: blind and low-vision 
 7. **The server approves, not the browser**: the server re-checks payee and amount, quotes, reads back the QUOTE, and checks the PIN itself (salted hash, 5 tries then a 15-minute lock, stored per user). Each approval is bound to one request, quote and amount and works once; a tap alone is refused; a payment is paid once even if the approval is sent twice: `src/lib/server/payflow.ts`, `src/lib/security/approve.ts` (+ tests).
 8. **Firestore is server-only**: the rules deny every browser read and write; only the server (Admin SDK) stores PINs, pending payments and receipts. Rules and API are tested on the Firebase emulators: `firestore.rules`, `src/emu/` (`npm run test:emu`).
 9. **"No" means no**: "No, don't send it" cancels; a spoken "yes" only asks for the PIN: `src/lib/hybrid/confirm.ts` (+ test).
+10. **Audit log and history**: every server step (`pin_set`, `pay_start`, `pay_finish`, `pay_cancel`, `wallet_connect`, `wallet_callback`, `passkey_options`, `passkey_register`) and a small fixed list of browser steps (`/api/audit`) is saved to Firestore (`audit`, whitelisted fields only: no PIN, token, name or sentence) and printed as one `audit ...` console line. The page section "My receipts and activity" (`/api/history`) shows your last 20 receipts (REAL or SIMULATED badge) and 30 events, so a payment can be proven after a page reset.
 
 ## What is real and what is simulated
 | Part | Status |

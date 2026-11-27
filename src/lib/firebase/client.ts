@@ -76,12 +76,17 @@ async function appCheckToken(ac: AppCheck): Promise<string> {
  * Calls one of our payment API routes as the signed-in (anonymous) Firebase user.
  * The server reads the user id from the verified token, never from the body.
  */
-export async function api<T = Record<string, unknown>>(path: string, body: unknown): Promise<T & { ok: boolean; reason?: string }> {
+export async function api<T = Record<string, unknown>>(path: string, body: unknown, opts: { signIn?: boolean } = {}): Promise<T & { ok: boolean; reason?: string }> {
   const { connectAuthEmulator, getAuth, signInAnonymously } = await import("firebase/auth");
   const auth = getAuth(firebaseApp());
   const emu = process.env.NEXT_PUBLIC_AUTH_EMULATOR; // local tests only, e.g. http://127.0.0.1:9099
   if (emu && !auth.emulatorConfig) connectAuthEmulator(auth, emu, { disableWarnings: true });
-  const user = auth.currentUser ?? (await signInAnonymously(auth)).user;
+  // signIn:false (opening the page, loading history): never create a new anonymous user just for this.
+  // Wait for Firebase to restore a saved session first; with none, answer "signed_out" without a call.
+  if (opts.signIn === false) await auth.authStateReady();
+  const existing = auth.currentUser;
+  if (!existing && opts.signIn === false) return { ok: false, reason: "signed_out" } as T & { ok: boolean; reason?: string };
+  const user = existing ?? (await signInAnonymously(auth)).user;
   const res = await fetch(path, {
     method: "POST",
     headers: {
@@ -96,4 +101,13 @@ export async function api<T = Record<string, unknown>>(path: string, body: unkno
   } catch {
     return { ok: false, reason: `http_${res.status}` } as T & { ok: boolean; reason?: string };
   }
+}
+
+/**
+ * Tells the server a step that only the browser can see (see server/clientaudit.ts). Fire and forget:
+ * it never waits, never throws, and sends only small fixed fields, never what the person said.
+ */
+export function reportEvent(fields: Record<string, string | number | boolean>, opts: { signIn?: boolean } = {}): void {
+  if (!firebaseConfigured()) return;
+  void api("/api/audit", fields, opts).catch(() => undefined);
 }

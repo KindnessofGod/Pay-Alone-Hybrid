@@ -6,7 +6,7 @@ import { understand, type Policy, type Understood } from "@/lib/hybrid/understan
 import type { Contact } from "@/lib/hybrid/crosscheck";
 import { nanoAvailability } from "@/lib/hybrid/device";
 import { installLocalSpeech, listenOnce, localSpeechStatus, say, stopListening } from "@/lib/hybrid/listen";
-import { firebaseApp, firebaseConfigured, remoteSettings } from "@/lib/firebase/client";
+import { firebaseApp, firebaseConfigured, remoteSettings, reportEvent } from "@/lib/firebase/client";
 import { speechMode, type SpeechStatus } from "@/lib/hybrid/speechpolicy";
 import { chatEngines, firebaseEngines, lastCall, prepareOnDevice, warmUpOnDevice } from "@/lib/firebase/engines";
 import { DEMO_CONTACTS } from "@/lib/demo/contacts";
@@ -16,6 +16,7 @@ import { chatReply, type ChatTurn } from "@/lib/hybrid/chat";
 import { afterPayment, chatOnly, initialDialog, next as dialogNext, silence, type DialogState } from "@/lib/hybrid/dialog";
 import { spokenSecret } from "@/lib/hybrid/tripwire";
 import Approve from "./Approve";
+import History from "./History";
 import { takeResume, type Resume } from "@/lib/ui/resume";
 
 // SIMULATED test contacts until the saved-contacts screen exists (the server checks the same list).
@@ -43,6 +44,7 @@ export default function Home() {
   const [approving, setApproving] = useState<{ payeeId: string; amountMinor: string; key: number } | null>(null);
   const [working, setWorking] = useState("");
   const [voice, setVoice] = useState<TtsStatus>("off");
+  const [historyKey, setHistoryKey] = useState(0); // bumps after a payment so the receipts reload
   const busy = useRef(false);
   const dialog = useRef<DialogState>(initialDialog());
   const lastInput = useRef<"voice" | "typed">("typed"); // hands-free loop only when the person is using the mic
@@ -57,7 +59,11 @@ export default function Home() {
 
   useEffect(() => {
     setVoice(speaker.status());
-    return speaker.onStatus(setVoice);
+    return speaker.onStatus((st) => {
+      setVoice(st);
+      if (st === "ready") reportEvent({ event: "voice_ready", voice: "natural" });
+      if (st === "failed") reportEvent({ event: "voice_ready", voice: "browser" });
+    });
   }, []);
   const seq = useRef(0); // only the newest request may change the screen
 
@@ -120,6 +126,7 @@ export default function Home() {
       const s = ready ? undefined : await start(false);
       await handle(text, s, "typed");
     } catch {
+      reportEvent({ event: "error", code: "start_failed" });
       setWorking("Something went wrong. Please try again.");
     }
   }
@@ -143,6 +150,7 @@ export default function Home() {
           cloud: (x) => (setWorking("Asking online, with names and amounts hidden…"), firebaseEngines.cloud(x)),
         });
       } catch {
+        reportEvent({ event: "error", code: "understand_failed" });
         if (my !== seq.current) return false;
         setWorking("Something went wrong. Please try again.");
         await speak("Something went wrong. Please try again.");
@@ -152,6 +160,8 @@ export default function Home() {
       setWorking("");
       setMs(lastCall.ms);
       setResult(r);
+      // Only the route and the time are reported, never the sentence, names or amounts.
+      reportEvent({ event: "intent", source: r.source, ms: r.source === "rules" ? 0 : Math.max(0, Math.round(lastCall.ms)) });
       // The conversation decides what to say next. Its lines are fixed templates; it never approves anything.
       const o = dialogNext(dialog.current, r, { contacts: CONTACTS, said, limitMinor: c.limitMinor });
       // Open conversation: where the dialog only has a fallback line, the AI may answer in its own words.
@@ -167,6 +177,7 @@ export default function Home() {
           if (my !== seq.current) return false;
           if (cr.kind === "reply") {
             setMs(lastCall.ms);
+            reportEvent({ event: "chat_reply", source: cr.source, guarded: Boolean(cr.guarded) });
             if (!cr.guarded) {
               o.state = o.chat.state; // a real answer is not a miss
               o.say = `${cr.text}${o.chat.suffix ? ` ${o.chat.suffix}` : ""}`;
@@ -176,6 +187,7 @@ export default function Home() {
             // A guarded (unsafe or empty) AI answer is never spoken: the dialog's own friendly fixed line is used.
           }
         } catch {
+          reportEvent({ event: "error", code: "chat_failed" });
           // chat is optional: keep the fixed line
         }
         if (my !== seq.current) return false;
@@ -226,6 +238,7 @@ export default function Home() {
           again = o.then === "listen" && seq.current === before;
         }
       } catch {
+        reportEvent({ event: "error", code: "mic_failed" });
         setListening(false);
         await speak("The microphone did not work. You can type instead.");
       } finally {
@@ -240,6 +253,7 @@ export default function Home() {
   // Start App Check (reCAPTCHA) on page load, so a payment call right away already has its token.
   useEffect(() => {
     if (firebaseConfigured()) firebaseApp();
+    reportEvent({ event: "app_start" }, { signIn: false }); // only if a saved session exists; no new sign-in just for this
   }, []);
 
   // Back from the wallet's consent page: /?wallet=connected or /?wallet=failed.
@@ -349,6 +363,7 @@ export default function Home() {
             payeeId={approving.payeeId}
             amountMinor={approving.amountMinor}
             speak={speak}
+            onPaid={() => setHistoryKey((k) => k + 1)}
             listen={(() => {
               const m = speechMode(speech === "checking" ? "none" : speech, cloudSpeech);
               return m.mic ? () => listenOnce({ local: m.local }) : null;
@@ -368,6 +383,8 @@ export default function Home() {
           />
         )}
       </div>
+
+      <History refreshKey={historyKey} speak={speak} />
 
       <p className="status">
         Gemini Nano: <b>{nano}</b> · Speech recognition: <b>{speech === "local" ? "on this computer" : speech === "server" ? "Google servers" : speech}</b> · Voice: <b>{voice === "ready" ? "natural (on this computer)" : voice === "loading" ? "loading, browser voice meanwhile" : "browser"}</b> · Policy: <b>{policy}</b>
