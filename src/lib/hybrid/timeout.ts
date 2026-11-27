@@ -15,7 +15,7 @@ export function orAfter<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
 /** The answer if it comes within ms, else an error naming what stalled. */
 export function failAfter<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
   return new Promise((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error(`${what} did not answer in ${Math.round(ms / 1000)} seconds`)), ms);
+    const t = setTimeout(() => reject(new Error(`${what} did not answer in time`)), ms);
     p.then(
       (v) => { clearTimeout(t); resolve(v); },
       (e) => { clearTimeout(t); reject(e); },

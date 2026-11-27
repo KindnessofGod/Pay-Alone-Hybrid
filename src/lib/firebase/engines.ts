@@ -101,11 +101,20 @@ async function run(model: GenerativeModel, said: string): Promise<unknown> {
 
 // One on-device call at a time: the SDK destroys the previous Chrome session when it starts a new one.
 const onDeviceOnce = oneAtATime(async (said: string) => {
-  const out = await failAfter(run(onDevice(), said), 15_000, "Gemini Nano");
+  // On a CPU-only PC the first answer includes loading the model into memory; warmUpOnDevice() does that early.
+  const out = await failAfter(run(onDevice(), said), 30_000, "Gemini Nano");
   // Honesty guard: only count an answer as on-device if the SDK says it ran on the device.
   if (lastCall.source !== InferenceSource.ON_DEVICE) throw new Error("not answered on device");
   return out;
 });
+
+/** Loads Gemini Nano into memory right after Start, with a made-up sentence, so the person's first request is fast. */
+export function warmUpOnDevice(): Promise<boolean> {
+  return onDeviceOnce("send 100 naira to Tunde").then(
+    () => true,
+    () => false,
+  );
+}
 
 export const firebaseEngines: Engines = {
   onDevice: onDeviceOnce,

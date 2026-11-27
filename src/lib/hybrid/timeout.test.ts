@@ -21,7 +21,7 @@ describe("timeouts: a browser feature that never answers must not freeze the app
   it("failAfter throws a named timeout so the caller can fall back and say why", async () => {
     vi.useFakeTimers();
     const p = failAfter(new Promise<string>(() => {}), 8000, "Gemini Nano");
-    const check = expect(p).rejects.toThrow("Gemini Nano did not answer in 8 seconds");
+    const check = expect(p).rejects.toThrow("Gemini Nano did not answer in time");
     await vi.advanceTimersByTimeAsync(8000);
     await check;
     vi.useRealTimers();

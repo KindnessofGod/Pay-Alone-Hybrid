@@ -3,6 +3,7 @@
 // Otherwise Chrome's server recognition is used, and the screen says so.
 "use client";
 import { failAfter, orAfter } from "./timeout";
+import { pickVoice } from "./voice";
 
 type Rec = {
   lang: string;
@@ -106,7 +107,9 @@ export function say(text: string): Promise<void> {
     if (typeof speechSynthesis === "undefined") return resolve();
     speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(text);
-    u.rate = 0.9;
+    const voice = pickVoice(speechSynthesis.getVoices?.() ?? []);
+    if (voice) u.voice = voice;
+    u.rate = 0.95;
     // Chrome sometimes never fires onend; never wait longer than the sentence could take.
     const t = setTimeout(resolve, 3_000 + text.length * 120);
     u.onend = () => { clearTimeout(t); resolve(); };

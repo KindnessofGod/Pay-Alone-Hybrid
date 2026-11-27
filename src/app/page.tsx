@@ -8,7 +8,7 @@ import { nanoAvailability } from "@/lib/hybrid/device";
 import { installLocalSpeech, listenOnce, localSpeechStatus, say, stopListening } from "@/lib/hybrid/listen";
 import { firebaseApp, firebaseConfigured, remoteSettings } from "@/lib/firebase/client";
 import { speechMode, type SpeechStatus } from "@/lib/hybrid/speechpolicy";
-import { firebaseEngines, lastCall, prepareOnDevice } from "@/lib/firebase/engines";
+import { firebaseEngines, lastCall, prepareOnDevice, warmUpOnDevice } from "@/lib/firebase/engines";
 import { DEMO_CONTACTS } from "@/lib/demo/contacts";
 import Approve from "./Approve";
 import { takeResume, type Resume } from "@/lib/ui/resume";
@@ -74,6 +74,11 @@ export default function Home() {
     }
     const nanoNow = await nanoAvailability();
     setNano(nanoNow);
+    if (nanoNow === "available") {
+      // In the background: load the model now, so the first real request does not pay for it.
+      setNano("warming up");
+      void warmUpOnDevice().then(() => setNano("available"));
+    }
     const sp = await speechCheck;
     setSpeech(sp);
     setReady(true);
@@ -103,9 +108,9 @@ export default function Home() {
       setWorking("Working on it…");
       let r: Understood;
       try {
-        r = await understand(said, { contacts: CONTACTS, limitMinor: c.limitMinor, policy: c.policy, deviceAvailable: c.nano === "available" }, {
+        r = await understand(said, { contacts: CONTACTS, limitMinor: c.limitMinor, policy: c.policy, deviceAvailable: c.nano === "available" || c.nano === "warming up" }, {
           // Say on screen which step is running, so a slow step never looks like a frozen app.
-          onDevice: (x) => (setWorking("Thinking on this computer (Gemini Nano)… up to 15 seconds"), firebaseEngines.onDevice(x)),
+          onDevice: (x) => (setWorking("Thinking on this computer (Gemini Nano)…"), firebaseEngines.onDevice(x)),
           cloud: (x) => (setWorking("Asking online, with names and amounts hidden…"), firebaseEngines.cloud(x)),
         });
       } catch {
