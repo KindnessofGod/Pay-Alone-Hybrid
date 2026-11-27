@@ -125,6 +125,20 @@ function clear(s: DialogState): DialogState {
   return { ...s, payeeId: undefined, amountMinor: undefined, asked: "none" };
 }
 
+const MONEY_WORDS = /\b(send|sent|pay|paid|payment|transfer|give|gave|money|naira|dollars?|cents?|kobo|cash|owe|wallet|balance|history|repeat|again|approve|pin)\b/i;
+const YES_NO = /\b(yes|yeah|yep|no|nope|okay|ok)\b/i;
+
+/**
+ * True when a sentence is plainly conversation: no amount, no contact name, no money word, no yes/no and
+ * no cancel. Such a sentence goes straight to the chat AI, saving a slow on-device intent call on CPU-only PCs.
+ * When unsure it returns false, so the sentence still goes through the payment checks.
+ */
+export function chatOnly(said: string, contacts: Contact[]): boolean {
+  if (carriesAmount(said) || MONEY_WORDS.test(said) || YES_NO.test(said) || CANCEL_WORDS.test(said)) return false;
+  const words = new Set(tokens(said));
+  return !contacts.some((c) => tokens(c.name).some((w) => words.has(w)));
+}
+
 export function next(state: DialogState, u: Understood, input: DialogContext): DialogOut {
   const contacts = input.contacts.filter((c) => validContactName(c.name));
   const said = input.said;

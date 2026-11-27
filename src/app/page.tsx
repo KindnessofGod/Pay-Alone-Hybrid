@@ -13,7 +13,8 @@ import { DEMO_CONTACTS } from "@/lib/demo/contacts";
 import { speaker } from "@/lib/hybrid/ttsBrowser";
 import type { TtsStatus } from "@/lib/hybrid/tts";
 import { chatReply, type ChatTurn } from "@/lib/hybrid/chat";
-import { afterPayment, initialDialog, next as dialogNext, silence, type DialogState } from "@/lib/hybrid/dialog";
+import { afterPayment, chatOnly, initialDialog, next as dialogNext, silence, type DialogState } from "@/lib/hybrid/dialog";
+import { spokenSecret } from "@/lib/hybrid/tripwire";
 import Approve from "./Approve";
 import { takeResume, type Resume } from "@/lib/ui/resume";
 
@@ -126,8 +127,12 @@ export default function Home() {
       const my = ++seq.current;
       setWorking("Working on it…");
       let r: Understood;
+      // Plain conversation (no name, amount or money word, nothing pending) skips the payment model and goes
+      // straight to the chat AI: one on-device call instead of two. The PIN tripwire still runs first.
+      const pendingPay = Boolean(dialog.current.payeeId || dialog.current.amountMinor);
+      const justChat = !pendingPay && !spokenSecret(said).tripped && chatOnly(said, CONTACTS);
       try {
-        r = await understand(said, { contacts: CONTACTS, limitMinor: c.limitMinor, policy: c.policy, deviceAvailable: c.nano === "available" || c.nano === "warming up" }, {
+        r = justChat ? { kind: "unclear", source: "rules" } : await understand(said, { contacts: CONTACTS, limitMinor: c.limitMinor, policy: c.policy, deviceAvailable: c.nano === "available" || c.nano === "warming up" }, {
           // Say on screen which step is running, so a slow step never looks like a frozen app.
           onDevice: (x) => (setWorking("Thinking on this computer (Gemini Nano)…"), firebaseEngines.onDevice(x)),
           cloud: (x) => (setWorking("Asking online, with names and amounts hidden…"), firebaseEngines.cloud(x)),

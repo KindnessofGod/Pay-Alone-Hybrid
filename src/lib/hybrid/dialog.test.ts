@@ -325,3 +325,14 @@ describe("dialog: open conversation hooks (chat is offered only where the fixed 
     expect(next({ ...initialDialog(), asked: "more" }, unclear, ctx("no")).chat).toBeUndefined();
   });
 });
+
+import { chatOnly } from "./dialog";
+describe("chatOnly: skip the payment model for sentences that are plainly just conversation", () => {
+  const contacts = [{ id: "c1", name: "Mama Ade" }, { id: "c2", name: "Tunde" }, { id: "c3", name: "Chidi Okafor" }];
+  it("plain questions and small talk are chat only", () => {
+    for (const s of ["how are you today", "is this app safe", "what is a weekly limit", "tell me a joke", "who made you"]) expect(chatOnly(s, contacts)).toBe(true);
+  });
+  it("anything that might be a payment, a name, an amount, a yes/no or a cancel is not", () => {
+    for (const s of ["send money", "pay him", "I want to give something to my daughter", "transfer please", "five thousand", "5000", "mama", "tell Tunde hi", "no", "yes please", "cancel", "how much is in my wallet", "naira"]) expect(chatOnly(s, contacts)).toBe(false);
+  });
+});

@@ -152,7 +152,7 @@ export const firebaseEngines: Engines = {
 
 /** The open conversation. The prompt already holds the persona and history (chat.ts); the cloud one is redacted there. */
 export const chatEngines: ChatEngines = {
-  onDevice: (text) => onDeviceCall(chatOnDevice(), text, 20_000),
+  onDevice: (text) => onDeviceCall(chatOnDevice(), text, 15_000),
   cloud: async (text) => {
     const out = await failAfter(run(chatCloud(), text), 10_000, "The online model");
     // Honesty guard: only count it as online if the SDK says so.
