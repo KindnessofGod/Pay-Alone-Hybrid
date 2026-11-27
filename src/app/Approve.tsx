@@ -17,7 +17,8 @@ interface Props {
   amountMinor: string;
   speak(text: string): Promise<void>;
   listen: (() => Promise<string>) | null; // null when the mic is off for privacy
-  onClose(): void;
+  /** "paid" after a receipt; "stopped" after a cancel, a stop or Not now. */
+  onClose(outcome: "paid" | "stopped"): void;
 }
 
 interface Receipt {
@@ -207,7 +208,7 @@ export default function Approve({ payeeId, amountMinor, speak, listen, onClose }
           <button type="button" className="big" onClick={() => void connectWallet()}>
             Connect wallet
           </button>
-          <button type="button" className="no" onClick={onClose}>
+          <button type="button" className="no" onClick={() => onClose("stopped")}>
             Not now
           </button>
         </div>
@@ -224,7 +225,7 @@ export default function Approve({ payeeId, amountMinor, speak, listen, onClose }
         </div>
       )}
       {(phase === "done" || phase === "stopped") && (
-        <button type="button" onClick={onClose}>
+        <button type="button" onClick={() => onClose(phase === "done" ? "paid" : "stopped")}>
           Done
         </button>
       )}

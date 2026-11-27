@@ -12,19 +12,12 @@ import { firebaseEngines, lastCall, prepareOnDevice, warmUpOnDevice } from "@/li
 import { DEMO_CONTACTS } from "@/lib/demo/contacts";
 import { speaker } from "@/lib/hybrid/ttsBrowser";
 import type { TtsStatus } from "@/lib/hybrid/tts";
+import { afterPayment, initialDialog, next as dialogNext, silence, type DialogState } from "@/lib/hybrid/dialog";
 import Approve from "./Approve";
 import { takeResume, type Resume } from "@/lib/ui/resume";
 
 // SIMULATED test contacts until the saved-contacts screen exists (the server checks the same list).
 const CONTACTS: Contact[] = DEMO_CONTACTS.map((c) => ({ ...c }));
-
-const REASONS: Record<string, string> = {
-  unknown_payee: "I don't know that person. I can only send to people saved in your list.",
-  payee_not_said: "Please say the full name of the person.",
-  no_amount: "Please say how much to send.",
-  amount_mismatch: "I heard two different amounts, so I stopped. Please say it again.",
-  over_limit: "That is more than your spending limit.",
-};
 
 const SOURCE_LABEL: Record<string, string> = {
   on_device: "Understood on this computer (Gemini Nano)",
@@ -40,15 +33,21 @@ export default function Home() {
   const [policy, setPolicy] = useState<Policy>("on_device_first");
   const [limitMinor, setLimitMinor] = useState("5000000");
   const [listening, setListening] = useState(false);
-  const [heard, setHeard] = useState("");
+  const [turns, setTurns] = useState<{ who: "you" | "app"; text: string }[]>([]);
   const [typed, setTyped] = useState("");
   const [result, setResult] = useState<Understood | null>(null);
-  const [spoken, setSpoken] = useState("");
   const [ms, setMs] = useState(0);
   const [approving, setApproving] = useState<{ payeeId: string; amountMinor: string; key: number } | null>(null);
   const [working, setWorking] = useState("");
   const [voice, setVoice] = useState<TtsStatus>("off");
   const busy = useRef(false);
+  const dialog = useRef<DialogState>(initialDialog());
+  const lastInput = useRef<"voice" | "typed">("typed"); // hands-free loop only when the person is using the mic
+  const inputBox = useRef<HTMLInputElement>(null);
+  const talkRef = useRef<(auto?: boolean) => Promise<void>>(async () => undefined);
+  const addTurn = useCallback((who: "you" | "app", text: string) => {
+    if (text) setTurns((t) => [...t, { who, text }].slice(-6));
+  }, []);
 
   useEffect(() => {
     setVoice(speaker.status());
@@ -57,7 +56,6 @@ export default function Home() {
   const seq = useRef(0); // only the newest request may change the screen
 
   const speak = useCallback(async (t: string) => {
-    setSpoken(t);
     await say(t);
   }, []);
 
@@ -92,7 +90,11 @@ export default function Home() {
     setSpeech(sp);
     setReady(true);
     setWorking("");
-    if (greet) await speak("Pay Alone is ready. Press the big button or the space bar, then say who to pay and how much.");
+    if (greet) {
+      const hi = "Pay Alone is ready. Press the big button or the space bar, then say who to pay and how much.";
+      addTurn("app", hi);
+      await speak(hi);
+    }
     return { policy: policyNow, limitMinor: limitNow, nano: nanoNow };
   }
 
@@ -100,17 +102,20 @@ export default function Home() {
   async function submitTyped() {
     if (!typed) return;
     stopListening(); // typing wins over a microphone that is still open
+    lastInput.current = "typed";
+    const text = typed;
+    setTyped("");
     try {
       const s = ready ? undefined : await start(false);
-      await handle(typed, s);
+      await handle(text, s, "typed");
     } catch {
       setWorking("Something went wrong. Please try again.");
     }
   }
 
+  /** Returns true when the conversation wants the microphone opened again (voice only). */
   const handle = useCallback(
-    async (said: string, now?: Settings) => {
-      setHeard(said);
+    async (said: string, now: Settings | undefined, via: "voice" | "typed"): Promise<boolean> => {
       setApproving(null);
       const c = now ?? { policy, limitMinor, nano };
       const my = ++seq.current;
@@ -123,52 +128,72 @@ export default function Home() {
           cloud: (x) => (setWorking("Asking online, with names and amounts hidden…"), firebaseEngines.cloud(x)),
         });
       } catch {
-        if (my !== seq.current) return;
+        if (my !== seq.current) return false;
         setWorking("Something went wrong. Please try again.");
         await speak("Something went wrong. Please try again.");
-        return;
+        return false;
       }
-      if (my !== seq.current) return; // a newer request started while this one ran
+      if (my !== seq.current) return false; // a newer request started while this one ran
       setWorking("");
       setMs(lastCall.ms);
-      if (r.kind === "secret_spoken") {
-        setHeard("(deleted)");
-        setResult(r);
-        await speak("Stop. Never say your PIN or card number out loud. I have deleted what you said.");
-        return;
-      }
       setResult(r);
-      if (r.kind === "proposal") setApproving({ payeeId: r.proposal.payeeId, amountMinor: r.proposal.amountMinor, key: Date.now() });
-      else if (r.kind === "rejected") await speak(REASONS[r.reason] ?? "I could not do that.");
-      else if (r.kind === "intent") await speak(`You asked about ${r.action}. That part is coming soon.`);
-      else await speak("Sorry, I did not understand. Say who to pay and how much.");
+      // The conversation decides what to say next. Its lines are fixed templates; it never approves anything.
+      const o = dialogNext(dialog.current, r, { contacts: CONTACTS, said, limitMinor: c.limitMinor });
+      dialog.current = o.state;
+      addTurn("you", r.kind === "secret_spoken" ? "(deleted)" : said);
+      if (o.then === "approve" && o.approve) {
+        setApproving({ ...o.approve, key: Date.now() });
+        return false;
+      }
+      addTurn("app", o.say);
+      await speak(o.say);
+      if (my !== seq.current) return false; // the person typed or pressed something while it was speaking
+      if (o.then === "listen") {
+        if (via === "voice") return true;
+        inputBox.current?.focus(); // typed: keep typing; do not open the mic
+      }
+      return false;
     },
-    [limitMinor, policy, nano, speak],
+    [limitMinor, policy, nano, speak, addTurn],
   );
 
-  const talk = useCallback(async () => {
-    if (busy.current) return stopListening(); // a second press stops listening
-    const mode = speechMode(speech === "checking" ? "none" : speech, cloudSpeech);
-    if (!mode.mic) {
-      await speak("Speaking is off on this computer, to keep your voice private. Please type instead.");
-      return;
-    }
-    busy.current = true;
-    setListening(true);
-    try {
-      const before = seq.current;
-      const said = await listenOnce({ local: mode.local });
-      setListening(false);
-      if (seq.current !== before) return; // the person typed while the mic was open: their typing wins
-      if (said) await handle(said);
-      else await speak("I did not hear anything. Try again.");
-    } catch {
-      setListening(false);
-      await speak("The microphone did not work. You can type instead.");
-    } finally {
-      busy.current = false;
-    }
-  }, [handle, speak, speech, cloudSpeech]);
+  const talk = useCallback(
+    async (auto = false) => {
+      if (busy.current) return stopListening(); // a second press stops listening
+      const mode = speechMode(speech === "checking" ? "none" : speech, cloudSpeech);
+      if (!mode.mic) {
+        await speak("Speaking is off on this computer, to keep your voice private. Please type instead.");
+        return;
+      }
+      lastInput.current = "voice";
+      busy.current = true;
+      setListening(true);
+      let again = false;
+      try {
+        const before = seq.current;
+        const said = await listenOnce({ local: mode.local });
+        setListening(false);
+        if (seq.current !== before) return; // the person typed while the mic was open: their typing wins
+        if (said) {
+          again = await handle(said, undefined, "voice");
+        } else {
+          const o = silence(dialog.current); // after 2 silent turns in a row the loop stops
+          dialog.current = o.state;
+          addTurn("app", o.say);
+          await speak(o.say);
+          again = o.then === "listen" && seq.current === before;
+        }
+      } catch {
+        setListening(false);
+        await speak("The microphone did not work. You can type instead.");
+      } finally {
+        busy.current = false;
+      }
+      if (again && (auto || lastInput.current === "voice")) void talkRef.current(true);
+    },
+    [handle, speak, speech, cloudSpeech, addTurn],
+  );
+  talkRef.current = talk;
 
   // Start App Check (reCAPTCHA) on page load, so a payment call right away already has its token.
   useEffect(() => {
@@ -215,13 +240,13 @@ export default function Home() {
           Start
         </button>
       ) : (
-        <button className="big" aria-pressed={listening} onClick={talk}>
+        <button className="big" aria-pressed={listening} onClick={() => void talk()}>
           {listening ? "Listening..." : "Press to speak (or Space)"}
         </button>
       )}
 
       <div className="row">
-        <input aria-label="Or type what you want to do" placeholder="Or type: send 5000 naira to Mama Ade" value={typed} onChange={(e) => setTyped(e.target.value)} onKeyDown={(e) => e.key === "Enter" && void submitTyped()} />
+        <input ref={inputBox} aria-label="Or type what you want to do" placeholder="Or type: send 5000 naira to Mama Ade" value={typed} onChange={(e) => setTyped(e.target.value)} onKeyDown={(e) => e.key === "Enter" && void submitTyped()} />
         <button onClick={() => void submitTyped()}>Go</button>
       </div>
 
@@ -251,7 +276,13 @@ export default function Home() {
         {working && <p className="status">{working}</p>}
         {result && (
           <div className="card">
-            <p className="status">You said: <b>{heard}</b></p>
+            <ol className="transcript" aria-label="Conversation">
+              {turns.map((t, i) => (
+                <li key={i}>
+                  <b>{t.who === "you" ? "You:" : "Pay Alone:"}</b> {t.text}
+                </li>
+              ))}
+            </ol>
             {result.kind === "secret_spoken" ? (
               <span className="badge bad">PIN stopped before any AI saw it</span>
             ) : (
@@ -266,7 +297,6 @@ export default function Home() {
               </p>
             ))}
             {ms > 0 && result.kind !== "secret_spoken" && result.source !== "rules" && <p className="status">Model time: {ms} ms</p>}
-            {!approving && <p>{spoken}</p>}
           </div>
         )}
         {approving && (
@@ -279,7 +309,18 @@ export default function Home() {
               const m = speechMode(speech === "checking" ? "none" : speech, cloudSpeech);
               return m.mic ? () => listenOnce({ local: m.local }) : null;
             })()}
-            onClose={() => setApproving(null)}
+            onClose={(outcome) => {
+              stopListening(); // the approval card may still have the mic open for "no"
+              setApproving(null);
+              seq.current++; // anything still running from before no longer owns the screen
+              const my = seq.current;
+              const o = afterPayment(dialog.current, outcome);
+              dialog.current = o.state;
+              addTurn("app", o.say);
+              void speak(o.say).then(() => {
+                if (my === seq.current && lastInput.current === "voice" && speechMode(speech === "checking" ? "none" : speech, cloudSpeech).mic) void talkRef.current(true);
+              });
+            }}
           />
         )}
       </div>

@@ -46,3 +46,30 @@ describe("PIN-leak test: the text-to-speech path never gets a PIN", () => {
     expect(speaker.status()).toBe("ready");
   });
 });
+
+describe("PIN-leak test: the conversation never speaks or keeps a spoken PIN or the person's own words", () => {
+  it.each(["my pin is 4826", "send 5000 to Tunde my pin is four eight two six", "pin 4 8 2 6", "the code na 4826"])("%s", async (said) => {
+    const { next, initialDialog } = await import("./dialog");
+    const { spokenSecret } = await import("./tripwire");
+    const u = await understand(
+      said,
+      { contacts, limitMinor: "5000000", policy: "ai_off", deviceAvailable: false },
+      { onDevice: async () => ({}), cloud: async () => ({}) },
+    );
+    expect(spokenSecret(said).tripped).toBe(true);
+    const start = { ...initialDialog(), payeeId: "c1", amountMinor: "100" };
+    const o = next(start, u, { contacts, said, limitMinor: "5000000" });
+    expect(o.say).not.toMatch(/\d/);
+    expect(o.then).not.toBe("approve");
+    expect(JSON.stringify(o)).not.toMatch(/4826|four eight two six|4 8 2 6/i);
+    expect(o.state.payeeId).toBeUndefined();
+    expect(o.state.amountMinor).toBeUndefined();
+  });
+  it("answers that are not understood are never echoed", async () => {
+    const { next, initialDialog } = await import("./dialog");
+    for (const said of ["xyzzy plugh 4826", "the quick brown fox"]) {
+      const o = next(initialDialog(), { kind: "unclear", source: "rules" }, { contacts, said, limitMinor: "5000000" });
+      expect(o.say).not.toMatch(/xyzzy|plugh|4826|quick|fox/);
+    }
+  });
+});

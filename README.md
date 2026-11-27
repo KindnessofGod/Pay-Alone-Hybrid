@@ -40,6 +40,9 @@ Voice payments for people who cannot use a banking screen: blind and low-vision 
 | Quote and payment on the Interledger test wallet (USD test money; the naira amount is converted at the CBN rate of 16 Nov, display only; all three contacts pay one receiver wallet) | Implemented for the real rail when both wallets are configured; **Simulated** (no money moves, receipt says SIMULATED) when they are not |
 | Windows Hello / phone passkey approval | Planned (server check written and tested; screen not wired) |
 
+## Conversation
+Pay Alone talks back and forth instead of taking one command. Say "hello", "pay Tunde", and it asks "How much would you like to send to Tunde?"; "five thousand" fills the amount and opens approval. After the receipt it asks "Done. Is there anything else?"; "no" ends with "Okay. Goodbye." In voice mode the microphone reopens by itself after each reply (it stops after two silent turns, or three misunderstandings, and offers typing); if you typed, it does not open the mic. The conversation is a plain-code state machine (`src/lib/hybrid/dialog.ts`, tested). Every spoken line is a fixed template: the person's own words are never repeated, amounts are never spoken by the conversation (the read-back with the amount comes from the server quote), and the conversation only hands `payeeId` and `amountMinor` to the approval card. It never approves or pays; the PIN still decides. Balance and history are not built: it says so.
+
 ## Judge quick test
 1. Open the live URL in desktop Chrome, press **Start**, then press Space and say "send five thousand naira to Mama Ade". Or type it.
 2. The badge says whether Gemini Nano on your computer or Gemini online understood it, and shows exactly what the cloud received.
