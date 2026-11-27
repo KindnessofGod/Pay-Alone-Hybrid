@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { OpError } from "../op/types";
 import { MemoryStore } from "../store/memory";
 import { cancelPayment, finishPayment, setUserPin, startPayment, type PayDeps } from "./payflow";
@@ -226,5 +226,20 @@ describe("wallet connection and wallet failures", () => {
     if (!s.ok) throw new Error("start failed");
     const f = await finishPayment(d, "u1", { requestId: s.requestId, proof: { method: "pin", challenge: s.challenge, pin: "4826" } });
     expect(f).toEqual({ ok: false, reason: "payment_failed" });
+  });
+});
+
+describe("server log of a finished payment (so a payment can be checked without opening the database)", () => {
+  it("logs one line with the receipt id, method, asset and real/simulated, and no PIN, user or payee", async () => {
+    const d = await ready();
+    const s = await startPayment(d, "u1", { payeeId: "c2", amountMinor: "100000" });
+    if (!s.ok) throw new Error("start failed");
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    const f = await finishPayment(d, "u1", { requestId: s.requestId, proof: { method: "pin", challenge: s.challenge, pin: "4826" } });
+    const lines = info.mock.calls.map((c) => c.join(" "));
+    info.mockRestore();
+    if (!f.ok) throw new Error("finish failed");
+    expect(lines).toEqual([`payment_ok ${f.receipt.id} method=pin asset=NGN simulated=true`]);
+    expect(lines.join()).not.toMatch(/4826|u1|Tunde/);
   });
 });

@@ -185,6 +185,8 @@ export async function finishPayment(
     createdAt: new Date(d.now?.() ?? Date.now()).toISOString(),
   };
   await d.store.put("receipts", receipt.id, receipt);
+  // One line per payment, so it can be checked in the server logs. No PIN, user id or payee name.
+  console.info(`payment_ok ${receipt.id} method=${receipt.method} asset=${receipt.debit.assetCode} simulated=${receipt.simulated}`);
   const what = `${speakPlain(receipt.debit)} to ${receipt.payeeName}. Receipt saved.`;
   return { ok: true, receipt, spoken: receipt.simulated ? `Simulated payment, no real money moved. ${what}` : `Sent. ${what}` };
 }
