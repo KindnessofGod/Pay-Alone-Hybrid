@@ -109,5 +109,5 @@ const onDeviceOnce = oneAtATime(async (said: string) => {
 
 export const firebaseEngines: Engines = {
   onDevice: onDeviceOnce,
-  cloud: (said) => failAfter(run(cloud(), said), 15_000, "The online model"),
+  cloud: (said) => failAfter(run(cloud(), said), 10_000, "The online model"),
 };

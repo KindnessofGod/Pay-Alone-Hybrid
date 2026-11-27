@@ -102,7 +102,11 @@ export default function Home() {
       setWorking("Working on it…");
       let r: Understood;
       try {
-        r = await understand(said, { contacts: CONTACTS, limitMinor: c.limitMinor, policy: c.policy, deviceAvailable: c.nano === "available" }, firebaseEngines);
+        r = await understand(said, { contacts: CONTACTS, limitMinor: c.limitMinor, policy: c.policy, deviceAvailable: c.nano === "available" }, {
+          // Say on screen which step is running, so a slow step never looks like a frozen app.
+          onDevice: (x) => (setWorking("Thinking on this computer (Gemini Nano)… up to 15 seconds"), firebaseEngines.onDevice(x)),
+          cloud: (x) => (setWorking("Asking online, with names and amounts hidden…"), firebaseEngines.cloud(x)),
+        });
       } catch {
         if (my !== seq.current) return;
         setWorking("Something went wrong. Please try again.");

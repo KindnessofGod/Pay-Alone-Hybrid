@@ -51,4 +51,20 @@ describe("listenOnce never hangs on 'Listening...'", () => {
     FakeRec.last!.onend!();
     expect(await p).toBe("send 5000 naira to Tunde");
   });
+
+  it("still ends when Chrome never fires onend after stop (seen on a real PC)", async () => {
+    vi.useFakeTimers();
+    class DeafRec extends FakeRec { stop() { this.stopped = true; } abort() { this.stopped = true; } }
+    (globalThis as Record<string, unknown>).SpeechRecognition = DeafRec;
+    const p = listenOnce({ local: true, maxMs: 8000 });
+    await vi.advanceTimersByTimeAsync(9000);
+    expect(await p).toBe("");
+  });
+  it("stopListening() ends it at once even when Chrome never fires onend", async () => {
+    class DeafRec extends FakeRec { stop() { this.stopped = true; } abort() { this.stopped = true; } }
+    (globalThis as Record<string, unknown>).SpeechRecognition = DeafRec;
+    const p = listenOnce({ local: true });
+    stopListening();
+    expect(await p).toBe("");
+  });
 });
