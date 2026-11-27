@@ -167,9 +167,8 @@ export default function Home() {
               o.say = `${cr.text}${o.chat.suffix ? ` ${o.chat.suffix}` : ""}`;
               o.then = o.chat.then;
               ai = { source: cr.source, sent: cr.sentToCloud };
-            } else if (o.then === "listen") {
-              o.say = cr.text; // the fixed safe line; the miss still counts
             }
+            // A guarded (unsafe or empty) AI answer is never spoken: the dialog's own friendly fixed line is used.
           }
         } catch {
           // chat is optional: keep the fixed line
