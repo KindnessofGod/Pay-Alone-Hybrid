@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { open } from "../secret";
 import { interactionHash } from "../op/hash";
 import type { GrantLimits, PaymentsGateway, WalletInfo } from "../op/types";
@@ -52,6 +52,19 @@ describe("wallet connection = spending-cap consent", () => {
     const { g } = gw();
     (g as unknown as { requestOutgoingGrant: unknown }).requestOutgoingGrant = async () => { throw new OpError("grant_rejected", "no"); };
     expect(await start(new MemoryStore(), g)).toEqual({ ok: false, reason: "wallet_refused" });
+  });
+
+  it("logs why the wallet failed (kind, status, short message) so it can be fixed, never a token", async () => {
+    const { g } = gw();
+    (g as unknown as { getWallet: unknown }).getWallet = async () => { throw new OpError("wallet_unreachable", "Could not reach the wallet (Private key is not in a recognised form).", { status: 401, code: "invalid_client" }); };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(await start(new MemoryStore(), g)).toEqual({ ok: false, reason: "wallet_unreachable" });
+    const logged = warn.mock.calls.map((c) => c.join(" ")).join("\n");
+    warn.mockRestore();
+    expect(logged).toContain("wallet_connect_failed");
+    expect(logged).toContain("wallet_unreachable");
+    expect(logged).toContain("401");
+    expect(logged).toContain("Private key is not in a recognised form");
   });
 
   async function begun() {

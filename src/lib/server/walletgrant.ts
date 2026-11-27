@@ -84,7 +84,12 @@ export async function startWalletConnect(a: {
     await a.store.put("grant_pending", state, rec);
     return { ok: true, redirectUrl: pending.redirectUrl };
   } catch (e) {
-    if (e instanceof OpError) return { ok: false, reason: e.kind === "wallet_unreachable" ? "wallet_unreachable" : "wallet_refused" };
+    if (e instanceof OpError) {
+      // Server log only: our own fixed text plus what the wallet said. Tokens never reach an OpError.
+      const d = e.detail ?? {};
+      console.warn("wallet_connect_failed", e.kind, d.status ?? "-", d.code ?? "-", (d.description ?? "").slice(0, 120), e.message.slice(0, 200));
+      return { ok: false, reason: e.kind === "wallet_unreachable" ? "wallet_unreachable" : "wallet_refused" };
+    }
     throw e;
   }
 }
