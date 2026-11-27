@@ -8,6 +8,7 @@ import { spokenSecret } from "@/lib/hybrid/tripwire";
 import { formatAmount } from "@/lib/money";
 import { approvalMessage } from "@/lib/ui/messages";
 import { pinAnnouncement, pinPress } from "@/lib/ui/pinpad";
+import { saveResume } from "@/lib/ui/resume";
 
 type Phase = "connect" | "starting" | "set_pin" | "confirm_pin" | "pin" | "sending" | "done" | "stopped";
 
@@ -73,6 +74,7 @@ export default function Approve({ payeeId, amountMinor, speak, listen, onClose }
   async function connectWallet() {
     const r = await call<{ redirectUrl: string }>("/api/wallet/connect", {});
     if (r.ok && r.redirectUrl) {
+      saveResume(window.sessionStorage, { payeeId, amountMinor }); // so the person can carry on after the wallet page
       window.location.href = r.redirectUrl;
       return;
     }

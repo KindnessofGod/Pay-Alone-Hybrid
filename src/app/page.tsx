@@ -11,6 +11,7 @@ import { speechMode, type SpeechStatus } from "@/lib/hybrid/speechpolicy";
 import { firebaseEngines, lastCall, prepareOnDevice } from "@/lib/firebase/engines";
 import { DEMO_CONTACTS } from "@/lib/demo/contacts";
 import Approve from "./Approve";
+import { takeResume, type Resume } from "@/lib/ui/resume";
 
 // SIMULATED test contacts until the saved-contacts screen exists (the server checks the same list).
 const CONTACTS: Contact[] = DEMO_CONTACTS.map((c) => ({ ...c }));
@@ -157,10 +158,18 @@ export default function Home() {
 
   // Back from the wallet's consent page: /?wallet=connected or /?wallet=failed.
   const [walletNote, setWalletNote] = useState("");
+  const [resume, setResume] = useState<Resume | null>(null);
   useEffect(() => {
     const w = new URLSearchParams(window.location.search).get("wallet");
     if (w !== "connected" && w !== "failed") return;
-    const t = w === "connected" ? "Wallet connected. Your weekly limit is set." : "The wallet was not connected. Nothing was changed. You can try again when you pay.";
+    const back = takeResume(window.sessionStorage);
+    if (w === "connected" && back) setResume(back);
+    const t =
+      w === "connected"
+        ? back
+          ? "Wallet connected. Your weekly limit is set. Press Continue to finish your payment."
+          : "Wallet connected. Your weekly limit is set."
+        : "The wallet was not connected. Nothing was changed. You can try again when you pay.";
     setWalletNote(t);
     window.history.replaceState(null, "", window.location.pathname);
     void say(t).catch(() => undefined); // the browser may block speech before a first tap; the text stays on screen
@@ -208,6 +217,18 @@ export default function Home() {
 
       <div aria-live="polite">
         {walletNote && <p className="status">{walletNote}</p>}
+        {resume && !approving && (
+          <button
+            className="big"
+            onClick={() => {
+              setApproving({ ...resume, key: Date.now() });
+              setResume(null);
+              setWalletNote("");
+            }}
+          >
+            Continue payment to {CONTACTS.find((c) => c.id === resume.payeeId)?.name ?? "your contact"}
+          </button>
+        )}
         {working && <p className="status">{working}</p>}
         {result && (
           <div className="card">
