@@ -6,6 +6,7 @@ import { randomToken } from "../secret";
 import { getStore, storeKind } from "../store";
 import type { Verify, VerifyAppCheck } from "./http";
 import type { PayDeps } from "./payflow";
+import { appOrigin } from "./origin";
 import { opPayDeps } from "./opdeps";
 import { storedPasskeys } from "./passkeystore";
 import { verifyAppCheckToken, verifyFirebaseIdToken } from "./tokens";
@@ -15,9 +16,9 @@ export const serverReady = () => storeKind() !== "none";
 // Revocation is not checked; tokens live up to 1 hour.
 export const verifyUser: Verify = (idToken) => verifyFirebaseIdToken(idToken);
 
-/** On when APPCHECK_ENFORCE=1 (set once the reCAPTCHA key is registered). */
+/** Fails closed: on unless APPCHECK_ENFORCE is explicitly "0" (local dev and tests only). */
 export function appCheckGate(): VerifyAppCheck | undefined {
-  if (process.env.APPCHECK_ENFORCE !== "1") return undefined;
+  if (process.env.APPCHECK_ENFORCE === "0") return undefined;
   return async (token) => {
     if (!token) throw new Error("no App Check token");
     await verifyAppCheckToken(token);
@@ -39,7 +40,7 @@ export function payDeps(req: Request): PayDeps {
   const store = getStore();
   const base: PayDeps = {
     store,
-    baseUrl: new URL(req.url).origin,
+    baseUrl: appOrigin(req.url),
     limitMinor: Number(process.env.VOICE_LIMIT_MINOR ?? 5_000_000),
     passkeys: (userId) => storedPasskeys(store, userId),
     contacts: async () => DEMO_CONTACTS.map((c) => ({ ...c })),

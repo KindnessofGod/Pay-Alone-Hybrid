@@ -1,5 +1,6 @@
 import { gateway } from "@/lib/op";
 import { realRail, serverReady } from "@/lib/server/deps";
+import { appOrigin } from "@/lib/server/origin";
 import { finishWalletConnect } from "@/lib/server/walletgrant";
 import { getStore } from "@/lib/store";
 
@@ -24,5 +25,5 @@ export async function GET(req: Request) {
   } catch (e) {
     console.error("wallet callback error", e instanceof Error ? e.name : "unknown"); // name only, never details
   }
-  return new Response(null, { status: 303, headers: { location: `${u.origin}/?wallet=${ok ? "connected" : "failed"}`, "cache-control": "no-store" } });
+  return new Response(null, { status: 303, headers: { location: `${appOrigin(req.url)}/?wallet=${ok ? "connected" : "failed"}`, "cache-control": "no-store" } });
 }

@@ -1,6 +1,7 @@
 import { gateway } from "@/lib/op";
 import { appCheckGate, payerUrl, realRail, serverReady, verifyUser, weeklyCapMinor } from "@/lib/server/deps";
 import { handle } from "@/lib/server/http";
+import { appOrigin } from "@/lib/server/origin";
 import { startWalletConnect } from "@/lib/server/walletgrant";
 import { getStore } from "@/lib/store";
 
@@ -18,7 +19,7 @@ export async function POST(req: Request) {
         wallet: gateway("wallet"),
         payerUrl: payerUrl(),
         userId,
-        origin: new URL(req.url).origin,
+        origin: appOrigin(req.url),
         capMinor: weeklyCapMinor(),
       });
     },
