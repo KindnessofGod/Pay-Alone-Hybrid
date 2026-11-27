@@ -9,7 +9,7 @@ import { formatAmount } from "@/lib/money";
 import { approvalMessage } from "@/lib/ui/messages";
 import { pinAnnouncement, pinPress } from "@/lib/ui/pinpad";
 
-type Phase = "starting" | "set_pin" | "confirm_pin" | "pin" | "sending" | "done" | "stopped";
+type Phase = "connect" | "starting" | "set_pin" | "confirm_pin" | "pin" | "sending" | "done" | "stopped";
 
 interface Props {
   payeeId: string;
@@ -60,10 +60,24 @@ export default function Approve({ payeeId, amountMinor, speak, listen, onClose }
     } else if (r.reason === "no_pin_set") {
       setPhase("set_pin");
       await tell("First, choose a PIN of 4 to 6 digits. Type it on the keys. Never say it out loud.");
+    } else if (r.reason === "wallet_not_connected") {
+      setPhase("connect");
+      await tell(approvalMessage({ ok: false, reason: r.reason }));
     } else {
       setPhase("stopped");
       await tell(approvalMessage({ ok: false, reason: r.reason ?? "unknown" }));
     }
+  }
+
+  // One-time wallet connection: the wallet's own page is where the weekly limit is set and agreed to.
+  async function connectWallet() {
+    const r = await call<{ redirectUrl: string }>("/api/wallet/connect", {});
+    if (r.ok && r.redirectUrl) {
+      window.location.href = r.redirectUrl;
+      return;
+    }
+    setPhase("stopped");
+    await tell("I could not reach your wallet. Nothing was changed. Please try again.");
   }
 
   // After the read-back the person may say "no". "Yes" only reminds them to type the PIN.
@@ -185,6 +199,16 @@ export default function Approve({ payeeId, amountMinor, speak, listen, onClose }
             </button>
           </div>
         </form>
+      )}
+      {phase === "connect" && (
+        <div className="row">
+          <button type="button" className="big" onClick={() => void connectWallet()}>
+            Connect wallet
+          </button>
+          <button type="button" className="no" onClick={onClose}>
+            Not now
+          </button>
+        </div>
       )}
       {phase === "sending" && <p className="status">Checking your PIN on the server...</p>}
       {receipt && (

@@ -131,6 +131,17 @@ export default function Home() {
     }
   }, [handle, speak, speech, cloudSpeech]);
 
+  // Back from the wallet's consent page: /?wallet=connected or /?wallet=failed.
+  const [walletNote, setWalletNote] = useState("");
+  useEffect(() => {
+    const w = new URLSearchParams(window.location.search).get("wallet");
+    if (w !== "connected" && w !== "failed") return;
+    const t = w === "connected" ? "Wallet connected. Your weekly limit is set." : "The wallet was not connected. Nothing was changed. You can try again when you pay.";
+    setWalletNote(t);
+    window.history.replaceState(null, "", window.location.pathname);
+    void say(t).catch(() => undefined); // the browser may block speech before a first tap; the text stays on screen
+  }, []);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.code === "Space" && ready && !approving && document.activeElement?.tagName !== "INPUT") {
@@ -172,6 +183,7 @@ export default function Home() {
       )}
 
       <div aria-live="polite">
+        {walletNote && <p className="status">{walletNote}</p>}
         {result && (
           <div className="card">
             <p className="status">You said: <b>{heard}</b></p>

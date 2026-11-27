@@ -35,7 +35,8 @@ Voice payments for people who cannot use a banking screen: blind and low-vision 
 | PIN tripwire, redaction, cross-check, template read-back | Implemented |
 | Server-checked PIN approval, receipts written by the server to Firestore | Implemented |
 | Contacts (Mama Ade, Tunde, Chidi Okafor) | **Simulated** test list |
-| Quote and payment | **Simulated** (no money moves) until the Open Payments test-wallet rail is wired |
+| Wallet connection and weekly spending limit (Open Payments grant, consent on the wallet's own page) | Implemented in code and unit-tested with fake wallets; **live only when the `RECEIVER_*` and `PAYER_*` keys are set**, otherwise not available |
+| Quote and payment on the Interledger test wallet (USD test money; the naira amount is converted at the CBN rate of 16 Nov, display only; all three contacts pay one receiver wallet) | Implemented for the real rail when both wallets are configured; **Simulated** (no money moves, receipt says SIMULATED) when they are not |
 | Windows Hello / phone passkey approval | Planned (server check written and tested; screen not wired) |
 
 ## Judge quick test

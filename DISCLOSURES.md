@@ -13,6 +13,7 @@ These files were ported from our earlier Pay Alone prototype (`KindnessofGod/cu-
 - `src/lib/op/*`: Open Payments client (official SDK) and a simulated wallet for tests.
 - `src/lib/store/*`: small document store (Postgres store removed).
 - `src/lib/voice/sentences.ts`, `src/lib/voice/intent.ts`, `intent.test.ts`: read-back sentences and keyword intents in 5 languages (non-English wording not yet checked by native speakers).
+- `src/lib/op/hash.ts`, `src/lib/server/walletgrant.ts`, `src/lib/server/opdeps.ts` and `src/app/api/wallet/*`: the one-time wallet connection (grant request, interaction-hash check, token sealing) and the quote/pay wiring follow the earlier prototype's wallet setup, callback and send routes, rewritten for this app's store and tests.
 Everything under `src/lib/hybrid/`, `src/lib/firebase/` and `src/app/` is new for this entry.
 
 ## Simulated parts
