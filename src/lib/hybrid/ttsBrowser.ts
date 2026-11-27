@@ -96,4 +96,4 @@ export function browserVoice(text: string): Playing {
   };
 }
 
-export const speaker = createSpeaker({ loadModel: loadKokoro, play: playAudio, fallback: browserVoice, generateLimitMs: 8_000 });
+export const speaker = createSpeaker({ loadModel: loadKokoro, play: playAudio, fallback: browserVoice, generateLimitMs: 15_000 }); // CPU-only PCs are slower than real time on long sentences
