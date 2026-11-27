@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, it } from "vitest";
+import { OpError } from "../op/types";
 import { MemoryStore } from "../store/memory";
 import { cancelPayment, finishPayment, setUserPin, startPayment, type PayDeps } from "./payflow";
 
@@ -186,5 +187,44 @@ describe("parallel attacks (review 27 Nov)", () => {
     now += 11 * 60_000;
     const f = await finishPayment(d, "u1", { requestId: s.requestId, proof: { method: "pin", challenge: s.challenge, pin: "4826" } });
     expect(f).toMatchObject({ ok: false, reason: "not_found" });
+  });
+});
+
+describe("wallet connection and wallet failures", () => {
+  it("start: says wallet_not_connected when the rail needs a wallet and none is connected", async () => {
+    const d = await ready(deps({ walletReady: async () => false }));
+    expect(await startPayment(d, "u1", { payeeId: "c1", amountMinor: "500" })).toEqual({ ok: false, reason: "wallet_not_connected" });
+  });
+
+  it("start: the PIN check comes first, then the wallet check", async () => {
+    const d = deps({ walletReady: async () => false });
+    expect(await startPayment(d, "u1", { payeeId: "c1", amountMinor: "500" })).toMatchObject({ reason: "no_pin_set" });
+  });
+
+  it("start: goes ahead when the wallet is connected", async () => {
+    const d = await ready(deps({ walletReady: async () => true }));
+    expect(await startPayment(d, "u1", { payeeId: "c1", amountMinor: "500" })).toMatchObject({ ok: true });
+  });
+
+  it("start: a wallet that cannot quote gives quote_failed, nothing is stored", async () => {
+    const d = await ready(deps({ quote: async () => { throw new OpError("quote_failed", "no"); } }));
+    expect(await startPayment(d, "u1", { payeeId: "c1", amountMinor: "500" })).toEqual({ ok: false, reason: "quote_failed" });
+  });
+
+  it("finish: a wallet refusal over the cap becomes over_cap and no receipt is written", async () => {
+    const d = await ready(deps({ pay: async () => { throw new OpError("limit_exceeded", "over"); } }));
+    const s = await startPayment(d, "u1", { payeeId: "c1", amountMinor: "500" });
+    if (!s.ok) throw new Error("start failed");
+    const f = await finishPayment(d, "u1", { requestId: s.requestId, proof: { method: "pin", challenge: s.challenge, pin: "4826" } });
+    expect(f).toEqual({ ok: false, reason: "over_cap" });
+    expect(await d.store.list("receipts")).toHaveLength(0);
+  });
+
+  it("finish: any other wallet failure becomes payment_failed", async () => {
+    const d = await ready(deps({ pay: async () => { throw new OpError("wallet_unreachable", "down"); } }));
+    const s = await startPayment(d, "u1", { payeeId: "c1", amountMinor: "500" });
+    if (!s.ok) throw new Error("start failed");
+    const f = await finishPayment(d, "u1", { requestId: s.requestId, proof: { method: "pin", challenge: s.challenge, pin: "4826" } });
+    expect(f).toEqual({ ok: false, reason: "payment_failed" });
   });
 });

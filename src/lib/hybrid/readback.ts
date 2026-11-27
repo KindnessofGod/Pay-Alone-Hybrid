@@ -1,7 +1,7 @@
 // The sentence the app says before approval. It is a fixed template filled from the proposal, which
 // itself comes from plain code and the saved contact list. Model text is never read out, so a model
 // can never tell the person that money moved.
-import { speakPlain, type Amount } from "../money";
+import { nairaOf, speakPlain, type Amount } from "../money";
 import type { Proposal } from "./crosscheck";
 
 export function readBack(p: Proposal): string {
@@ -11,5 +11,8 @@ export function readBack(p: Proposal): string {
 
 /** Read-back built from the quote: the amount that will leave the wallet, fees included (rule 7). */
 export function quoteReadBack(payeeName: string, debit: Amount): string {
-  return `You want to send money to ${payeeName}. It will take ${speakPlain(debit)} from your wallet, fees included. To approve, type your PIN. Say no to cancel.`;
+  // The test network is in dollars, so a dollar debit also says the naira figure (display only).
+  const n = nairaOf(debit);
+  const naira = n && n !== "0" ? ` (about ${n} naira at the CBN rate of 16 Nov)` : "";
+  return `You want to send money to ${payeeName}. It will take ${speakPlain(debit)} from your wallet${naira}, fees included. To approve, type your PIN. Say no to cancel.`;
 }

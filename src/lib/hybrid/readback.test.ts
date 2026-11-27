@@ -23,4 +23,10 @@ describe("read-back from the quote", () => {
   it("never claims money has moved", () => {
     expect(quoteReadBack("Tunde", { value: "1000", assetCode: "USD", assetScale: 2 })).not.toMatch(/has been|was sent|paid|done|complete|success/i);
   });
+  it("a dollar debit also says the naira figure at the CBN rate", () => {
+    const t = quoteReadBack("Mama Ade", { value: "370", assetCode: "USD", assetScale: 2 });
+    expect(t).toBe(
+      "You want to send money to Mama Ade. It will take 3 dollars and 70 cents from your wallet (about 5,010 naira at the CBN rate of 16 Nov), fees included. To approve, type your PIN. Say no to cancel.",
+    );
+  });
 });

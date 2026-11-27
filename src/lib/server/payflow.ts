@@ -6,6 +6,7 @@
 //   setUserPin     sets the PIN once; changing it needs the old one.
 // Nothing here ever stores or returns a PIN.
 import { issueChallenge, type ApprovalChallenge, type ApprovalSubject } from "../approval";
+import { OpError } from "../op/types";
 import { quoteReadBack } from "../hybrid/readback";
 import { speakPlain, type Amount } from "../money";
 import type { StoredPasskey } from "../passkey";
@@ -32,6 +33,8 @@ export interface PayDeps {
   contacts(userId: string): Promise<Contact[]>;
   quote(userId: string, payee: Contact, amountMinor: string): Promise<QuoteResult>;
   pay(userId: string, quoteId: string): Promise<{ paymentId: string; simulated: boolean }>;
+  /** Real rail only: has this person connected a wallet and set a weekly limit? Absent for the simulated rail. */
+  walletReady?(userId: string): Promise<boolean>;
   passkeys?(userId: string): Promise<StoredPasskey[]>;
   now?(): number;
 }
@@ -89,16 +92,23 @@ export async function startPayment(
   body: { payeeId?: unknown; amountMinor?: unknown },
 ): Promise<
   | { ok: true; requestId: string; challenge: string; readBack: string; debit: Amount; payeeName: string; simulated: boolean }
-  | { ok: false; reason: "no_pin_set" | "unknown_payee" | "bad_amount" | "over_limit" }
+  | { ok: false; reason: "no_pin_set" | "wallet_not_connected" | "unknown_payee" | "bad_amount" | "over_limit" | "quote_failed" }
 > {
   if (!(await pinStoreOf(d.store).get(userId))) return { ok: false, reason: "no_pin_set" };
+  if (d.walletReady && !(await d.walletReady(userId))) return { ok: false, reason: "wallet_not_connected" };
   const payee = (await d.contacts(userId)).find((c) => c.id === body.payeeId);
   if (!payee) return { ok: false, reason: "unknown_payee" };
   const amount = body.amountMinor;
   if (typeof amount !== "string" || !/^\d{1,15}$/.test(amount) || BigInt(amount) <= 0n) return { ok: false, reason: "bad_amount" };
   if (BigInt(amount) > BigInt(d.limitMinor)) return { ok: false, reason: "over_limit" };
 
-  const quote = await d.quote(userId, payee, amount);
+  let quote: QuoteResult;
+  try {
+    quote = await d.quote(userId, payee, amount);
+  } catch (e) {
+    if (e instanceof OpError) return { ok: false, reason: "quote_failed" };
+    throw e;
+  }
   const pending: Pending = { userId, requestId: `req_${randomToken(12)}`, payee, quote, createdAt: d.now?.() ?? Date.now() };
   await d.store.put("pending", pendingKey(userId, pending.requestId), pending);
   return {
@@ -149,7 +159,14 @@ export async function finishPayment(
   // Take the pending payment so it can be paid only once.
   const mine = await d.store.take<Pending>("pending", key);
   if (!mine) return { ok: false, reason: "not_found" };
-  const paid = await d.pay(userId, mine.quote.quoteId);
+  let paid: { paymentId: string; simulated: boolean };
+  try {
+    paid = await d.pay(userId, mine.quote.quoteId);
+  } catch (e) {
+    // The wallet said no (or did not answer). Nothing is recorded as sent. Error text is never returned.
+    if (e instanceof OpError) return { ok: false, reason: e.kind === "limit_exceeded" ? "over_cap" : "payment_failed" };
+    throw e;
+  }
   const receipt: Receipt = {
     id: `rcpt_${randomToken(12)}`,
     userId,

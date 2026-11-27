@@ -10,6 +10,10 @@ const FIXED: Record<string, string> = {
   bad_challenge: "That approval has expired. Nothing was sent. Please start again.",
   bad_passkey: "Your fingerprint or Windows Hello did not work. Type your PIN instead, or say no to cancel.",
   unreachable: "I could not reach the approval server. Nothing was sent. Please try again.",
+  wallet_not_connected: "First, connect your wallet once and set a weekly spending limit.",
+  over_cap: "That is more than the weekly limit you set in your wallet. Nothing was sent.",
+  quote_failed: "The wallet could not price this payment. Nothing was sent. Please try again.",
+  payment_failed: "The wallet could not send it. Nothing was sent. Please try again.",
   signed_out: "You are signed out. Please reload the page. Nothing was sent.",
 };
 
