@@ -24,7 +24,7 @@ const CONTACTS: Contact[] = DEMO_CONTACTS.map((c) => ({ ...c }));
 const SOURCE_LABEL: Record<string, string> = {
   on_device: "Understood on this computer (Gemini Nano)",
   cloud: "Understood online (Gemini) - no names or amounts sent",
-  rules: "Understood by plain rules (no AI)",
+  rules: "Understood instantly on this computer by plain rules (no AI needed)",
 };
 
 export default function Home() {
@@ -68,7 +68,6 @@ export default function Home() {
   type Settings = { policy: Policy; limitMinor: string; nano: string };
 
   async function start(greet = true): Promise<Settings> {
-    speaker.load(); // natural on-device voice: downloads in the background; the browser voice speaks until it is ready
     setWorking("Getting ready…");
     let policyNow = policy;
     let limitNow = limitMinor;
@@ -88,9 +87,15 @@ export default function Home() {
     const nanoNow = await nanoAvailability();
     setNano(nanoNow);
     if (nanoNow === "available") {
-      // In the background: load the model now, so the first real request does not pay for it.
+      // In the background: load Gemini Nano first, then the natural voice, one after the other, so they do
+      // not fight over the processor (on CPU-only PCs that made Nano several times slower).
       setNano("warming up");
-      void warmUpOnDevice().then(() => setNano("available"));
+      void warmUpOnDevice().then(() => {
+        setNano("available");
+        speaker.load();
+      });
+    } else {
+      speaker.load(); // natural on-device voice; the browser voice speaks until it is ready
     }
     const sp = await speechCheck;
     setSpeech(sp);
@@ -132,7 +137,7 @@ export default function Home() {
       const pendingPay = Boolean(dialog.current.payeeId || dialog.current.amountMinor);
       const justChat = !pendingPay && !spokenSecret(said).tripped && chatOnly(said, CONTACTS);
       try {
-        r = justChat ? { kind: "unclear", source: "rules" } : await understand(said, { contacts: CONTACTS, limitMinor: c.limitMinor, policy: c.policy, deviceAvailable: c.nano === "available" || c.nano === "warming up" }, {
+        r = justChat ? { kind: "unclear", source: "rules" } : await understand(said, { contacts: CONTACTS, limitMinor: c.limitMinor, policy: c.policy, deviceAvailable: c.nano === "available" || c.nano === "warming up", instant: true }, {
           // Say on screen which step is running, so a slow step never looks like a frozen app.
           onDevice: (x) => (setWorking("Thinking on this computer (Gemini Nano)…"), firebaseEngines.onDevice(x)),
           cloud: (x) => (setWorking("Asking online, with names and amounts hidden…"), firebaseEngines.cloud(x)),

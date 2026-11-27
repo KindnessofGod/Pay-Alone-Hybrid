@@ -29,6 +29,8 @@ export interface Context {
   limitMinor: string;
   policy: Policy;
   deviceAvailable: boolean;
+  /** Clean commands ("send 2000 naira to Tunde") skip the AI: instant, and fully checked by plain code. */
+  instant?: boolean;
 }
 
 /** Why a path was not used, for the screen: "on-device: ..." or "online: ...". Never holds the sentence. */
@@ -86,6 +88,19 @@ export function toIntent(raw: unknown): AiIntent | null {
   return { action: o.action, amountMinor, payee };
 }
 
+const CLEAN = /^\s*(?:please\s+)?(?:send|pay|transfer|give)\s+(?:[\d,]+|[a-z]+(?:[\s-]+[a-z]+){0,5})\s+(?:naira\s+)?to\s+(.+?)\s*[.!]?\s*$/i;
+
+/** A short, plain command with one saved name and one amount: read by plain code alone, no model needed. */
+function cleanCommand(said: string, contacts: Contact[], limitMinor: string): Understood | null {
+  const m = CLEAN.exec(said);
+  if (!m) return null;
+  const who = contacts.filter((c) => c.name.toLowerCase() === m[1].toLowerCase());
+  if (who.length !== 1) return null;
+  const checked = crossCheck({ action: "send", amountMinor: null, payee: who[0].name }, said, contacts, limitMinor);
+  if (!checked.ok) return null; // let the full path explain what is wrong
+  return { kind: "proposal", proposal: checked.proposal, needsApproval: true, source: "rules" };
+}
+
 /** No-AI reading: a send word, one saved name, and an amount. Used when AI is off or unavailable. */
 export function rulesIntent(said: string, contacts: Contact[]): AiIntent {
   const named = contacts.filter((c) => new RegExp(`\\b${c.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(said));
@@ -101,6 +116,11 @@ export async function understand(said: string, input: Context, engines: Engines)
   const ctx = { ...input, contacts: input.contacts.filter((c) => validContactName(c.name)) };
   const secret = spokenSecret(said);
   if (secret.tripped) return { kind: "secret_spoken", secret: secret.kind ?? "pin", source: "rules" };
+
+  if (ctx.instant) {
+    const quick = cleanCommand(said, ctx.contacts, ctx.limitMinor);
+    if (quick) return quick;
+  }
 
   let route = decideRoute(ctx.policy, ctx.deviceAvailable);
   let intent: AiIntent | null = null;

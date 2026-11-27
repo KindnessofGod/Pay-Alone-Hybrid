@@ -47,3 +47,13 @@ describe("deterministic cross-check of what the AI understood", () => {
     expect(crossCheck({ action: "balance", amountMinor: null, payee: null }, "how much is left", contacts, limitMinor)).toEqual({ ok: false, reason: "not_send" });
   });
 });
+
+describe("amount units: Gemini Nano sometimes answers in naira instead of kobo", () => {
+  it("accepts the model's amount in naira when the sentence says that many naira (the sentence's amount is used)", () => {
+    const r = crossCheck({ action: "send", amountMinor: 2000, payee: "Tunde" }, "send 2000 naira to Tunde", contacts, "5000000");
+    expect(r).toMatchObject({ ok: true, proposal: { amountMinor: "200000" } });
+  });
+  it("still refuses a model amount that is neither the kobo nor the naira figure", () => {
+    expect(crossCheck({ action: "send", amountMinor: 3000, payee: "Tunde" }, "send 2000 naira to Tunde", contacts, "5000000")).toEqual({ ok: false, reason: "amount_mismatch" });
+  });
+});

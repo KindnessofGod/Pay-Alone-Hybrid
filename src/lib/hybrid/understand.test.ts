@@ -168,3 +168,28 @@ describe("skip reasons stay short and useful", () => {
     expect(r.skipped?.[1]).toBe("online: AI: Error fetching from (link): [# ] Firebase App Check token is invalid.");
   });
 });
+
+describe("instant path: a clean command needs no AI (fast on CPU-only PCs)", () => {
+  it("a clean 'send <amount> naira to <saved name>' is understood by plain rules without calling any model", async () => {
+    const e = engines();
+    const r = await understand("send 2000 naira to Tunde", { contacts, limitMinor, policy: "on_device_first", deviceAvailable: true, instant: true }, e);
+    expect(r).toMatchObject({ kind: "proposal", source: "rules", proposal: { payeeId: "c2", amountMinor: "200000" } });
+    expect(e.onDevice).not.toHaveBeenCalled();
+    expect(e.cloud).not.toHaveBeenCalled();
+  });
+  it("a natural, messy sentence still goes to the AI", async () => {
+    const e = engines();
+    await understand("abeg help me send small money to my mama, like five thousand", { contacts, limitMinor, policy: "on_device_first", deviceAvailable: true, instant: true }, e);
+    expect(e.onDevice).toHaveBeenCalled();
+  });
+  it("the PIN tripwire still runs first", async () => {
+    const e = engines();
+    const r = await understand("send 2000 naira to Tunde my pin is 4826", { contacts, limitMinor, policy: "on_device_first", deviceAvailable: true, instant: true }, e);
+    expect(r.kind).toBe("secret_spoken");
+  });
+  it("without instant, clean commands still use the AI (unchanged)", async () => {
+    const e = engines({ onDevice: vi.fn(async () => ({ action: "send", amountMinor: 200000, payee: "Tunde" })) });
+    const r = await understand("send 2000 naira to Tunde", { contacts, limitMinor, policy: "on_device_first", deviceAvailable: true }, e);
+    expect(r.source).toBe("on_device");
+  });
+});

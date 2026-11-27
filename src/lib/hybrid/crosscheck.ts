@@ -50,7 +50,10 @@ export function crossCheck(ai: AiIntent, said: string, contacts: Contact[], limi
   if (!heard || BigInt(heard.minor) <= BigInt(0)) return { ok: false, reason: "no_amount" };
   if (ai.amountMinor !== null && ai.amountMinor !== undefined) {
     const aiMinor = String(ai.amountMinor);
-    if (!/^\d+$/.test(aiMinor) || BigInt(aiMinor) !== BigInt(heard.minor)) return { ok: false, reason: "amount_mismatch" };
+    // The amount always comes from the sentence (plain code). The model's figure is only a check, and small
+    // on-device models often give naira where kobo was asked, so "2000" for 2000 naira is accepted too.
+    const same = /^\d+$/.test(aiMinor) && (BigInt(aiMinor) === BigInt(heard.minor) || BigInt(aiMinor) * BigInt(100) === BigInt(heard.minor));
+    if (!same) return { ok: false, reason: "amount_mismatch" };
   }
   if (BigInt(heard.minor) > BigInt(limitMinor)) return { ok: false, reason: "over_limit" };
 
