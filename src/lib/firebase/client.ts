@@ -62,6 +62,16 @@ export async function remoteSettings(): Promise<{ policy: Policy; limitMinor: st
   }
 }
 
+/** Right after page load reCAPTCHA may still be loading, so one failed try is followed by a short wait and a retry. */
+async function appCheckToken(ac: AppCheck): Promise<string> {
+  for (let i = 0; i < 3; i++) {
+    const t = await getToken(ac).then((r) => r.token).catch(() => "");
+    if (t) return t;
+    await new Promise((r) => setTimeout(r, 1500));
+  }
+  return "";
+}
+
 /**
  * Calls one of our payment API routes as the signed-in (anonymous) Firebase user.
  * The server reads the user id from the verified token, never from the body.
@@ -77,7 +87,7 @@ export async function api<T = Record<string, unknown>>(path: string, body: unkno
     headers: {
       "content-type": "application/json",
       authorization: `Bearer ${await user.getIdToken()}`,
-      ...(appCheck ? { "x-firebase-appcheck": (await getToken(appCheck).catch(() => ({ token: "" }))).token } : {}),
+      ...(appCheck ? { "x-firebase-appcheck": await appCheckToken(appCheck) } : {}),
     },
     body: JSON.stringify(body),
   });

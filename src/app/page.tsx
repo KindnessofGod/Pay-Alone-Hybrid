@@ -6,7 +6,7 @@ import { understand, type Policy, type Understood } from "@/lib/hybrid/understan
 import type { Contact } from "@/lib/hybrid/crosscheck";
 import { nanoAvailability } from "@/lib/hybrid/device";
 import { installLocalSpeech, listenOnce, localSpeechStatus, say, stopListening } from "@/lib/hybrid/listen";
-import { firebaseConfigured, remoteSettings } from "@/lib/firebase/client";
+import { firebaseApp, firebaseConfigured, remoteSettings } from "@/lib/firebase/client";
 import { speechMode, type SpeechStatus } from "@/lib/hybrid/speechpolicy";
 import { firebaseEngines, lastCall, prepareOnDevice } from "@/lib/firebase/engines";
 import { DEMO_CONTACTS } from "@/lib/demo/contacts";
@@ -155,6 +155,11 @@ export default function Home() {
       busy.current = false;
     }
   }, [handle, speak, speech, cloudSpeech]);
+
+  // Start App Check (reCAPTCHA) on page load, so a payment call right away already has its token.
+  useEffect(() => {
+    if (firebaseConfigured()) firebaseApp();
+  }, []);
 
   // Back from the wallet's consent page: /?wallet=connected or /?wallet=failed.
   const [walletNote, setWalletNote] = useState("");
