@@ -229,17 +229,82 @@ describe("wallet connection and wallet failures", () => {
   });
 });
 
-describe("server log of a finished payment (so a payment can be checked without opening the database)", () => {
-  it("logs one line with the receipt id, method, asset and real/simulated, and no PIN, user or payee", async () => {
+describe("audit trail of the payment flow (survives a page reset, unlike the screen or the 1-hour logs)", () => {
+  const quiet = () => vi.spyOn(console, "info").mockImplementation(() => {});
+
+  it("finish logs one console line with the receipt id, method, asset and real/simulated, and no PIN, user or payee", async () => {
     const d = await ready();
     const s = await startPayment(d, "u1", { payeeId: "c2", amountMinor: "100000" });
     if (!s.ok) throw new Error("start failed");
-    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    const info = quiet();
     const f = await finishPayment(d, "u1", { requestId: s.requestId, proof: { method: "pin", challenge: s.challenge, pin: "4826" } });
     const lines = info.mock.calls.map((c) => c.join(" "));
     info.mockRestore();
     if (!f.ok) throw new Error("finish failed");
-    expect(lines).toEqual([`payment_ok ${f.receipt.id} method=pin asset=NGN simulated=true`]);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatch(new RegExp(`^audit pay_finish ok receiptId=${f.receipt.id} method=pin asset=NGN simulated=true ms=\\d+ requestId=${s.requestId}$`));
     expect(lines.join()).not.toMatch(/4826|u1|Tunde/);
+  });
+
+  it("every step is stored for the person: pin_set, pay_start, pay_finish (wrong, then ok), pay_cancel", async () => {
+    quiet();
+    const d = deps();
+    await setUserPin(d, "u1", { pin: "4826" });
+    await setUserPin(d, "u1", { pin: "1111" }); // weak, and needs the old PIN anyway
+    const s = await startPayment(d, "u1", { payeeId: "c1", amountMinor: "500" });
+    if (!s.ok) throw new Error("start failed");
+    const bad = await finishPayment(d, "u1", { requestId: s.requestId, proof: { method: "pin", challenge: s.challenge, pin: "9999" } });
+    if (bad.ok || !bad.challenge) throw new Error("expected wrong");
+    const good = await finishPayment(d, "u1", { requestId: s.requestId, proof: { method: "pin", challenge: bad.challenge, pin: "4826" } });
+    if (!good.ok) throw new Error("finish failed");
+    const s2 = await startPayment(d, "u1", { payeeId: "zz", amountMinor: "500" });
+    expect(s2.ok).toBe(false);
+    await cancelPayment(d, "u1", { requestId: "req_x" });
+    const rows = (await d.store.list<{ event: string; outcome?: string; reason?: string; receiptId?: string }>("audit")).map((r) => `${r.event}:${r.outcome}:${r.reason ?? ""}`);
+    expect(rows).toEqual(
+      expect.arrayContaining(["pin_set:ok:", "pin_set:fail:old_pin_needed", "pay_start:ok:", "pay_finish:fail:wrong", "pay_finish:ok:", "pay_start:fail:unknown_payee", "pay_cancel:ok:"]),
+    );
+    const dump = JSON.stringify(await d.store.list("audit"));
+    expect(dump).toContain(good.receipt.id);
+    expect(dump).not.toMatch(/4826|9999|1111|Mama|Tunde/);
+  });
+
+  it("a failed payment records payment_failed and over_cap reasons", async () => {
+    quiet();
+    for (const [kind, reason] of [["limit_exceeded", "over_cap"], ["wallet_unreachable", "payment_failed"]] as const) {
+      const d = await ready(deps({ pay: async () => Promise.reject(new OpError(kind, "x")) }));
+      const s = await startPayment(d, "u1", { payeeId: "c1", amountMinor: "500" });
+      if (!s.ok) throw new Error("start failed");
+      await finishPayment(d, "u1", { requestId: s.requestId, proof: { method: "pin", challenge: s.challenge, pin: "4826" } });
+      const rows = await d.store.list<{ event: string; reason?: string }>("audit");
+      expect(rows.some((r) => r.event === "pay_finish" && r.reason === reason)).toBe(true);
+    }
+  });
+
+  it("a broken audit store does not stop the payment", async () => {
+    quiet();
+    const d = await ready();
+    const s = await startPayment(d, "u1", { payeeId: "c1", amountMinor: "500" });
+    if (!s.ok) throw new Error("start failed");
+    const put = d.store.put.bind(d.store);
+    d.store.put = (async (c: string, id: string, doc: unknown) => (c === "audit" ? Promise.reject(new Error("down")) : put(c, id, doc))) as typeof d.store.put;
+    const f = await finishPayment(d, "u1", { requestId: s.requestId, proof: { method: "pin", challenge: s.challenge, pin: "4826" } });
+    expect(f.ok).toBe(true);
+  });
+
+  it("the receipt is also kept in the person's own list, found by user, newest first", async () => {
+    quiet();
+    let t = Date.now();
+    const d = await ready(deps({ now: () => ++t }));
+    const ids: string[] = [];
+    for (let i = 0; i < 2; i++) {
+      const s = await startPayment(d, "u1", { payeeId: "c1", amountMinor: "500" });
+      if (!s.ok) throw new Error("start failed");
+      const f = await finishPayment(d, "u1", { requestId: s.requestId, proof: { method: "pin", challenge: s.challenge, pin: "4826" } });
+      if (!f.ok) throw new Error("finish failed");
+      ids.push(f.receipt.id);
+    }
+    const mine = await d.store.list<{ id: string }>("receipts_by_user", { prefix: "u1|", newestFirst: true });
+    expect(mine.map((r) => r.id)).toEqual([...ids].reverse());
   });
 });

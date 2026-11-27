@@ -6,6 +6,7 @@ import type { Amount } from "../money";
 import { OpError, type PaymentsGateway } from "../op/types";
 import { makeInterval } from "../interval";
 import { open, randomToken, seal } from "../secret";
+import { audit } from "./audit";
 import type { Store } from "../store";
 
 /** The wallet's consent page must be finished within this time. */
@@ -48,7 +49,7 @@ export async function loadGrant(store: Store, userId: string): Promise<(GrantRec
   return g ? { ...g, token: open(g.accessToken) } : null;
 }
 
-export async function startWalletConnect(a: {
+async function startInner(a: {
   store: Store;
   wallet: PaymentsGateway;
   payerUrl: string;
@@ -95,19 +96,19 @@ export async function startWalletConnect(a: {
 }
 
 /** The wallet redirects the browser here after consent. The pending record can be used once. */
-export async function finishWalletConnect(a: {
+async function finishInner(a: {
   store: Store;
   wallet: PaymentsGateway;
   state: string;
   interactRef: string;
   hash: string;
   now?: () => number;
-}): Promise<{ ok: boolean }> {
+}): Promise<{ ok: boolean; userId?: string }> {
   const now = a.now?.() ?? Date.now();
   if (!a.state) return { ok: false };
   const p = await a.store.take<PendingRecord>("grant_pending", a.state);
   if (!p || now - p.createdAt > PENDING_GRANT_TTL_MS) return { ok: false };
-  if (!a.interactRef || !a.hash || !verifyInteractionHash(a.hash, p.clientNonce, p.finishNonce, a.interactRef, p.grantEndpoint)) return { ok: false };
+  if (!a.interactRef || !a.hash || !verifyInteractionHash(a.hash, p.clientNonce, p.finishNonce, a.interactRef, p.grantEndpoint)) return { ok: false, userId: p.userId };
   try {
     const t = await a.wallet.continueGrant({ continueUri: p.continueUri, continueToken: open(p.continueToken), interactRef: a.interactRef });
     await saveGrant(a.store, p.userId, {
@@ -119,9 +120,30 @@ export async function finishWalletConnect(a: {
       cap: p.cap,
       interval: p.interval,
     });
-    return { ok: true };
+    return { ok: true, userId: p.userId };
   } catch (e) {
-    if (e instanceof OpError) return { ok: false };
+    if (e instanceof OpError) return { ok: false, userId: p.userId };
     throw e;
   }
+}
+
+type Start = Parameters<typeof startInner>[0];
+export async function startWalletConnect(a: Start): ReturnType<typeof startInner> {
+  const t0 = Date.now();
+  let r: Awaited<ReturnType<typeof startInner>>;
+  try {
+    r = await startInner(a);
+  } catch (e) {
+    await audit(a.store, a.userId, "wallet_connect", { outcome: "fail", reason: "server_error", ms: Date.now() - t0 });
+    throw e;
+  }
+  await audit(a.store, a.userId, "wallet_connect", { outcome: r.ok ? "ok" : r.reason === "wallet_unreachable" ? "unreachable" : "refused", ms: Date.now() - t0 });
+  return r;
+}
+
+export async function finishWalletConnect(a: Parameters<typeof finishInner>[0]): Promise<{ ok: boolean }> {
+  const r = await finishInner(a);
+  // With an unknown or expired state there is no person to attach it to: console line only.
+  await audit(a.store, r.userId ?? null, "wallet_callback", { outcome: r.ok ? "connected" : "failed" });
+  return { ok: r.ok };
 }

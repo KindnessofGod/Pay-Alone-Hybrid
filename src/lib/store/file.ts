@@ -1,6 +1,6 @@
 import { promises as fs } from "fs";
 import path from "path";
-import type { Store } from "./index";
+import { pickEntries, type ListOptions, type Store } from "./index";
 
 type Data = Record<string, Record<string, unknown>>;
 
@@ -75,7 +75,7 @@ export class FileStore implements Store {
     });
   }
 
-  list<T>(collection: string): Promise<T[]> {
-    return this.serial(async () => Object.values((await this.read())[collection] ?? {}) as T[]);
+  list<T>(collection: string, opts?: ListOptions): Promise<T[]> {
+    return this.serial(async () => pickEntries<T>(Object.entries((await this.read())[collection] ?? {}), opts));
   }
 }

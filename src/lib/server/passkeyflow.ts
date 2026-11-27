@@ -7,6 +7,7 @@
 import { finishRegistration, registrationOptions, type PendingRegistration, type StoredPasskey } from "../passkey";
 import { checkPin } from "../security/pin";
 import { storedPasskeys, type PasskeyDoc } from "./passkeystore";
+import { audit, type AuditFields } from "./audit";
 import { pinStoreOf, type PayDeps } from "./payflow";
 
 export { storedPasskeys } from "./passkeystore";
@@ -16,7 +17,7 @@ export const MAX_PASSKEYS = 5;
 
 type RegOptions = Awaited<ReturnType<typeof registrationOptions>>["options"];
 
-export async function passkeyOptions(
+async function optionsInner(
   d: PayDeps,
   userId: string,
   body: { pin?: unknown },
@@ -32,7 +33,7 @@ export async function passkeyOptions(
   return { ok: true, options };
 }
 
-export async function passkeyRegister(
+async function registerInner(
   d: PayDeps,
   userId: string,
   body: { response?: unknown },
@@ -46,4 +47,26 @@ export async function passkeyRegister(
     result: undefined,
   }));
   return { ok: true };
+}
+
+async function audited<R extends { ok: boolean }>(d: PayDeps, userId: string, event: string, run: () => Promise<R>, fail: (r: R) => string): Promise<R> {
+  const t0 = Date.now();
+  let r: R;
+  try {
+    r = await run();
+  } catch (e) {
+    await audit(d.store, userId, event, { outcome: "fail", reason: "server_error", ms: Date.now() - t0 });
+    throw e;
+  }
+  const f: AuditFields = r.ok ? { outcome: "ok" } : { outcome: "fail", reason: fail(r) };
+  await audit(d.store, userId, event, { ...f, ms: Date.now() - t0 });
+  return r;
+}
+
+export function passkeyOptions(d: PayDeps, userId: string, body: { pin?: unknown }) {
+  return audited(d, userId, "passkey_options", () => optionsInner(d, userId, body), (r) => (r.ok ? "" : r.reason));
+}
+
+export function passkeyRegister(d: PayDeps, userId: string, body: { response?: unknown }) {
+  return audited(d, userId, "passkey_register", () => registerInner(d, userId, body), (r) => (r.ok ? "" : r.reason));
 }

@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { MemoryStore } from "../store/memory";
 import { approvalChallengeForDevice } from "../passkey";
 import { softKey } from "../testing/softkey";
@@ -169,5 +169,19 @@ describe("approving with the fingerprint", () => {
     const f = await finishPayment(d, "u1", { requestId: s.requestId, proof: { method: "pin", challenge: s.challenge, pin: "4826" } });
     expect(f.ok).toBe(true);
     if (f.ok) expect(f.receipt.method).toBe("pin");
+  });
+});
+
+describe("fingerprint audit", () => {
+  it("records passkey_options and passkey_register outcomes, never the PIN or the credential", async () => {
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    const d = await withPin();
+    await passkeyOptions(d, "u1", { pin: "9999" }); // wrong
+    await enroll(d, "u1");
+    await passkeyRegister(d, "u1", { response: {} }); // nothing pending
+    const rows = (await d.store.list<{ event: string; outcome: string; reason?: string }>("audit")).map((r) => `${r.event}:${r.outcome}:${r.reason ?? ""}`);
+    expect(rows).toEqual(expect.arrayContaining(["passkey_options:fail:wrong", "passkey_options:ok:", "passkey_register:ok:", "passkey_register:fail:no_pending"]));
+    expect(JSON.stringify(await d.store.list("audit"))).not.toMatch(/4826|9999|challenge|credential/i);
+    vi.restoreAllMocks();
   });
 });

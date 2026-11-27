@@ -108,3 +108,45 @@ describe("wallet connection = spending-cap consent", () => {
     expect(await store.get("grants", "u1")).toBeNull();
   });
 });
+
+describe("wallet connection audit", () => {
+  const rows = async (store: MemoryStore) => (await store.list<{ event: string; outcome: string; userId: string }>("audit")).map((r) => `${r.event}:${r.outcome}`);
+
+  it("records wallet_connect ok, refused and unreachable, and wallet_callback connected", async () => {
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    const { store, g, state, hash } = await (async () => {
+      const store = new MemoryStore();
+      const { g, seen } = gw();
+      await start(store, g);
+      const state = /state=([\w-]+)/.exec(seen.finishUri!)![1];
+      return { store, g, state, hash: interactionHash(seen.nonce!, "server-nonce", "ref-1", payer.authServer) };
+    })();
+    await finishWalletConnect({ store, wallet: g, state, interactRef: "ref-1", hash, now: () => NOW });
+    expect(await rows(store)).toEqual(expect.arrayContaining(["wallet_connect:ok", "wallet_callback:connected"]));
+
+    for (const [kind, want] of [["grant_rejected", "refused"], ["wallet_unreachable", "unreachable"]] as const) {
+      const s2 = new MemoryStore();
+      const { g: g2 } = gw();
+      (g2 as unknown as { requestOutgoingGrant: unknown }).requestOutgoingGrant = async () => { throw new OpError(kind, "x"); };
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+      await start(s2, g2);
+      expect(await rows(s2)).toEqual([`wallet_connect:${want}`]);
+    }
+    vi.restoreAllMocks();
+  });
+
+  it("a failed callback is recorded for the person when the state is known, and printed only when it is not; tokens never appear", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    const store = new MemoryStore();
+    const { g, seen } = gw();
+    await start(store, g);
+    const state = /state=([\w-]+)/.exec(seen.finishUri!)![1];
+    await finishWalletConnect({ store, wallet: g, state: "nope", interactRef: "ref-1", hash: "x", now: () => NOW });
+    expect(await rows(store)).toEqual(["wallet_connect:ok"]); // unknown state: no person to attach it to
+    await finishWalletConnect({ store, wallet: g, state, interactRef: "ref-1", hash: "AAAA", now: () => NOW });
+    expect(await rows(store)).toEqual(expect.arrayContaining(["wallet_callback:failed"]));
+    expect(info.mock.calls.map((c) => c.join(" "))).toContain("audit wallet_callback failed");
+    expect(JSON.stringify(await store.list("audit")) + info.mock.calls.join()).not.toMatch(/RAW-|continue|token/i);
+    vi.restoreAllMocks();
+  });
+});

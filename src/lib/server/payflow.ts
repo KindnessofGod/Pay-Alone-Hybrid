@@ -14,6 +14,7 @@ import { randomToken } from "../secret";
 import type { Store } from "../store";
 import { approvePayment, type ChallengeStore } from "../security/approve";
 import { checkPin, setPin, type PinStore } from "../security/pin";
+import { audit, type AuditFields } from "./audit";
 import { saveCounter } from "./passkeystore";
 
 export interface Contact {
@@ -87,7 +88,7 @@ async function newChallenge(d: PayDeps, p: Pending): Promise<string> {
   return c.challenge;
 }
 
-export async function startPayment(
+async function startInner(
   d: PayDeps,
   userId: string,
   body: { payeeId?: unknown; amountMinor?: unknown },
@@ -124,7 +125,7 @@ export async function startPayment(
   };
 }
 
-export async function finishPayment(
+async function finishInner(
   d: PayDeps,
   userId: string,
   body: { requestId?: unknown; proof?: unknown },
@@ -137,7 +138,7 @@ export async function finishPayment(
   const pending = await d.store.get<Pending>("pending", key);
   if (!pending || pending.userId !== userId) return { ok: false, reason: "not_found" };
   if ((d.now?.() ?? Date.now()) - pending.createdAt > PENDING_TTL_MS) {
-    await cancelPayment(d, userId, { requestId: body.requestId });
+    await cancelInner(d, userId, { requestId: body.requestId });
     return { ok: false, reason: "not_found" };
   }
 
@@ -185,13 +186,13 @@ export async function finishPayment(
     createdAt: new Date(d.now?.() ?? Date.now()).toISOString(),
   };
   await d.store.put("receipts", receipt.id, receipt);
-  // One line per payment, so it can be checked in the server logs. No PIN, user id or payee name.
-  console.info(`payment_ok ${receipt.id} method=${receipt.method} asset=${receipt.debit.assetCode} simulated=${receipt.simulated}`);
+  // The person's own list, found by user id and time. Best effort: the money has moved, so a failure here must not hide the receipt.
+  await d.store.put("receipts_by_user", `${userId}|${String(Date.parse(receipt.createdAt)).padStart(13, "0")}|${receipt.id}`, receipt).catch(() => undefined);
   const what = `${speakPlain(receipt.debit)} to ${receipt.payeeName}. Receipt saved.`;
   return { ok: true, receipt, spoken: receipt.simulated ? `Simulated payment, no real money moved. ${what}` : `Sent. ${what}` };
 }
 
-export async function cancelPayment(d: PayDeps, userId: string, body: { requestId?: unknown }): Promise<{ ok: true }> {
+async function cancelInner(d: PayDeps, userId: string, body: { requestId?: unknown }): Promise<{ ok: true }> {
   if (typeof body.requestId === "string") {
     await d.store.delete("pending", pendingKey(userId, body.requestId));
     await d.store.delete("challenges", pendingKey(userId, body.requestId));
@@ -199,7 +200,7 @@ export async function cancelPayment(d: PayDeps, userId: string, body: { requestI
   return { ok: true };
 }
 
-export async function setUserPin(
+async function setPinInner(
   d: PayDeps,
   userId: string,
   body: { pin?: unknown; oldPin?: unknown },
@@ -217,4 +218,45 @@ export async function setUserPin(
     return { ok: false, reason: "weak_pin" };
   }
   return { ok: true };
+}
+
+// Every step is audited (audit.ts): a durable record and one console line. Auditing never changes the answer.
+const ms = (t0: number) => Date.now() - t0;
+const failFields = (reason: string): AuditFields => ({ outcome: "fail", reason: /^[a-z_]{1,40}$/.test(reason) ? reason : "unknown" });
+
+async function audited<R>(d: PayDeps, userId: string, event: string, t0: number, run: () => Promise<R>, describe: (r: R) => AuditFields): Promise<R> {
+  let r: R;
+  try {
+    r = await run();
+  } catch (e) {
+    await audit(d.store, userId, event, { ...failFields("server_error"), ms: ms(t0) });
+    throw e;
+  }
+  await audit(d.store, userId, event, { ...describe(r), ms: ms(t0) });
+  return r;
+}
+
+export function startPayment(d: PayDeps, userId: string, body: { payeeId?: unknown; amountMinor?: unknown }) {
+  return audited(d, userId, "pay_start", Date.now(), () => startInner(d, userId, body), (r) =>
+    r.ok ? { outcome: "ok", requestId: r.requestId, simulated: r.simulated, asset: r.debit.assetCode, amountMinor: r.debit.value } : failFields(r.reason),
+  );
+}
+
+export function finishPayment(d: PayDeps, userId: string, body: { requestId?: unknown; proof?: unknown }) {
+  return audited(d, userId, "pay_finish", Date.now(), () => finishInner(d, userId, body), (r) =>
+    r.ok
+      ? { outcome: "ok", receiptId: r.receipt.id, method: r.receipt.method, simulated: r.receipt.simulated, asset: r.receipt.debit.assetCode, amountMinor: r.receipt.debit.value, requestId: r.receipt.requestId }
+      : { ...failFields(r.reason), ...(typeof body.requestId === "string" && /^req_/.test(body.requestId) ? { requestId: body.requestId } : {}) },
+  );
+}
+
+export function cancelPayment(d: PayDeps, userId: string, body: { requestId?: unknown }) {
+  return audited(d, userId, "pay_cancel", Date.now(), () => cancelInner(d, userId, body), () => ({ outcome: "ok", ...(typeof body.requestId === "string" && /^req_/.test(body.requestId) ? { requestId: body.requestId } : {}) }));
+}
+
+export function setUserPin(d: PayDeps, userId: string, body: { pin?: unknown; oldPin?: unknown }) {
+  // outcome: ok, weak, wrong, locked, or fail with a reason (bad_pin, old_pin_needed)
+  return audited(d, userId, "pin_set", Date.now(), () => setPinInner(d, userId, body), (r) =>
+    r.ok ? { outcome: "ok" } : r.reason === "weak_pin" ? { outcome: "weak" } : r.reason === "wrong" || r.reason === "locked" ? { outcome: r.reason } : failFields(r.reason),
+  );
 }

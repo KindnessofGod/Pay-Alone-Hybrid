@@ -3,8 +3,8 @@
 // Credentials: FIREBASE_SERVICE_ACCOUNT holds the service account JSON (set in Vercel, never in git).
 // Under the emulator (FIRESTORE_EMULATOR_HOST) no credentials are needed.
 import { adminApp } from "../server/admin";
-import { getFirestore, type Firestore } from "firebase-admin/firestore";
-import type { Store } from "./index";
+import { FieldPath, getFirestore, type Firestore } from "firebase-admin/firestore";
+import type { ListOptions, Store } from "./index";
 
 /** Document ids may not contain "/" or be "." or "..": encode every id the same way. */
 const docId = (id: string) => `k_${encodeURIComponent(id)}`;
@@ -42,7 +42,16 @@ export class FirestoreStore implements Store {
       return result;
     });
   }
-  async list<T>(collection: string): Promise<T[]> {
-    return (await this.db.collection(collection).get()).docs.map((d) => d.data() as T);
+  async list<T>(collection: string, opts?: ListOptions): Promise<T[]> {
+    let q: FirebaseFirestore.Query = this.db.collection(collection);
+    if (opts?.prefix) {
+      // docId() encodes each character on its own, so an encoded prefix is a prefix of the encoded id.
+      const p = docId(opts.prefix);
+      q = q.where(FieldPath.documentId(), ">=", p).where(FieldPath.documentId(), "<", p + "\uf8ff");
+    }
+    if (opts?.newestFirst) q = q.orderBy(FieldPath.documentId(), "desc");
+    else if (opts?.prefix) q = q.orderBy(FieldPath.documentId(), "asc");
+    if (opts?.limit !== undefined) q = q.limit(opts.limit);
+    return (await q.get()).docs.map((d) => d.data() as T);
   }
 }

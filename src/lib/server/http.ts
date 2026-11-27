@@ -8,6 +8,17 @@ export type Verify = (idToken: string) => Promise<string>;
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", "cache-control": "no-store" } });
 
+/** Thrown by a handler to answer with a status other than 200. Only the reason word is sent back. */
+export class HttpError extends Error {
+  constructor(
+    public status: number,
+    public reason: string,
+  ) {
+    super(reason);
+    this.name = "HttpError";
+  }
+}
+
 export type VerifyAppCheck = (appCheckToken: string) => Promise<void>;
 
 /** appCheck: when given, the call must carry a valid App Check token (X-Firebase-AppCheck), or it is refused. */
@@ -43,6 +54,7 @@ export async function handle(
   try {
     return json(200, await fn(userId, body));
   } catch (e) {
+    if (e instanceof HttpError) return json(e.status, { ok: false, reason: e.reason });
     // Only our own setup errors are logged in full; they describe configuration, never a request.
     const setup = e instanceof Error && e.message.startsWith("FIREBASE_SERVICE_ACCOUNT") ? e.message : "";
     console.error("api error", e instanceof Error ? e.name : "unknown", setup);

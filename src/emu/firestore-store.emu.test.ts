@@ -29,3 +29,13 @@ describe("FirestoreStore (emulator)", () => {
     expect(await s.get(c, "x/y")).toEqual({ n: 3 });
   });
 });
+
+describe("FirestoreStore list options (emulator)", () => {
+  it("prefix, newest first and limit", async () => {
+    const col = `l${Date.now()}`;
+    for (const id of ["u1|001|a", "u1|002|b", "u1|003|c", "u2|001|d", "u10|001|e"]) await s.put(col, id, { id });
+    const r = await s.list<{ id: string }>(col, { prefix: "u1|", newestFirst: true, limit: 2 });
+    expect(r.map((x) => x.id)).toEqual(["u1|003|c", "u1|002|b"]);
+    expect((await s.list<{ id: string }>(col, { prefix: "u1|" })).map((x) => x.id)).toEqual(["u1|001|a", "u1|002|b", "u1|003|c"]);
+  });
+});

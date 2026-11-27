@@ -1,5 +1,5 @@
 // In-memory store for tests. Every method body runs without awaiting, so each call is atomic.
-import type { Store } from "./index";
+import { pickEntries, type ListOptions, type Store } from "./index";
 
 export class MemoryStore implements Store {
   private data = new Map<string, Map<string, unknown>>();
@@ -30,8 +30,8 @@ export class MemoryStore implements Store {
     else this.col(c).set(id, structuredClone(doc));
     return result;
   }
-  async list<T>(c: string) {
-    return [...this.col(c).values()].map((v) => structuredClone(v) as T);
+  async list<T>(c: string, opts?: ListOptions) {
+    return pickEntries<T>([...this.col(c).entries()], opts).map((v) => structuredClone(v));
   }
   /** Everything stored, for tests that check nothing secret was kept. */
   dump() {
