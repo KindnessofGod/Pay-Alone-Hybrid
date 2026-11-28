@@ -111,8 +111,9 @@ describe("liveInstruction and tool declaration", () => {
   const pron = { Tunde: "TOON-day", "Mama Ade": "MAH-mah AH-day" };
   const t = liveInstruction(CONTACTS, pron);
   it("lists the names with pronunciations where given", () => {
-    expect(t).toContain("Tunde: say TOON-day");
-    expect(t).toContain("Mama Ade: say MAH-mah AH-day");
+    expect(t).toContain("Tunde (sounds like toon-day)");
+    expect(t).toMatch(/always write the name itself/i);
+    expect(t).toContain("Mama Ade (sounds like mah-mah ah-day)");
     expect(t).toContain("Chidi Okafor");
   });
   it("says naira, short, always call the tool, never claim done", () => {

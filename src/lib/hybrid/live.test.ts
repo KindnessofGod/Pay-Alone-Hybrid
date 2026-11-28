@@ -105,6 +105,15 @@ describe("handleToolCall", () => {
     const d = toolDeps({ latestInput: () => "send 500 to Tundi" });
     expect(await handleToolCall({ name: "propose_payment", args: args({ amount_naira: 500 }) }, d)).toEqual({ kind: "response", response: { shown: true } });
   });
+  it("a follow-up turn ('Yes, Tunde') still works: the amount and name may come from the person's last few turns", async () => {
+    const d = toolDeps({ latestInput: () => "Yes, Tunde", recentInputs: () => ["I would like to send 500 naira to Sunday", "Yes, Tunde"] });
+    expect(await handleToolCall({ name: "propose_payment", args: args({ amount_naira: 500 }) }, d)).toEqual({ kind: "response", response: { shown: true } });
+    expect(d.present).toHaveBeenCalledWith(expect.objectContaining({ proposal: { amountMinor: "50000", payeeId: "c2", payeeName: "Tunde" } }), "I would like to send 500 naira to Sunday Yes, Tunde");
+  });
+  it("earlier turns never add an amount the person did not say", async () => {
+    const d = toolDeps({ latestInput: () => "yes", recentInputs: () => ["send 500 naira to Tunde", "yes"] });
+    expect(await handleToolCall({ name: "propose_payment", args: args({ amount_naira: 900 }) }, d)).toEqual({ kind: "response", response: { shown: false, reason: "amount_not_heard" } });
+  });
   it("unknown payee: shown:false, reason and the saved names, no card", async () => {
     const d = toolDeps();
     const r = await handleToolCall({ name: "propose_payment", args: args({ payee: "Sunday" }) }, d);

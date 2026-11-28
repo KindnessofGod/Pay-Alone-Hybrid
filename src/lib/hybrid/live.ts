@@ -94,6 +94,8 @@ type ProposalResult = Extract<Understood, { kind: "proposal" }>;
 
 export interface ToolDeps {
   latestInput: () => string;
+  /** The person's last few turns, oldest first (e.g. "send 500 to Sunday", then "Yes, Tunde"). */
+  recentInputs?: () => string[];
   contacts: Contact[];
   limitMinor: () => string;
   /** Opens the existing Approve card. False if the app could not (the dialog said no). */
@@ -110,11 +112,24 @@ export async function handleToolCall(call: { name: string; args?: unknown }, d: 
     d.onTripwire(trip.kind ?? "pin");
     return { kind: "tripwire", secret: trip.kind ?? "pin" };
   }
-  const v = decideLivePayment(call.args, said, d.contacts, d.limitMinor());
+  let v = decideLivePayment(call.args, said, d.contacts, d.limitMinor());
+  let used = said;
+  // A follow-up ("Yes, Tunde") may hold only part of the request: also try the last two, then three, turns
+  // joined. The same plain checks apply, so an amount or name still has to be in what the person said.
+  const recent = d.recentInputs?.() ?? [];
+  for (let n = 2; !v.ok && v.reason !== "over_limit" && n <= Math.min(3, recent.length); n++) {
+    const joined = recent.slice(-n).join(" ").trim();
+    if (spokenSecret(joined).tripped) break;
+    const w = decideLivePayment(call.args, joined, d.contacts, d.limitMinor());
+    if (w.ok) {
+      v = w;
+      used = joined;
+    }
+  }
   if (!v.ok) return { kind: "response", response: { shown: false, reason: v.reason, ...(v.names ? { names: v.names } : {}) } };
   const r: ProposalResult = { kind: "proposal", proposal: v.proposal, needsApproval: true, source: "rules" };
   try {
-    const ok = await d.present(r, said);
+    const ok = await d.present(r, used);
     return { kind: "response", response: ok ? { shown: true } : { shown: false, reason: "not_ready" } };
   } catch {
     return { kind: "response", response: { shown: false, reason: "failed" } };
@@ -254,6 +269,7 @@ export function runLive(session: LiveSessionLike, d: LiveDeps, opts: { startMute
         try {
           out = await handleToolCall(call, {
             latestInput: () => currentInput(turns),
+            recentInputs: () => turns.filter((t) => t.who === "you").slice(-3).map((t) => t.text.trim()),
             contacts: d.contacts,
             limitMinor: d.limitMinor,
             present: async (r, said) => {

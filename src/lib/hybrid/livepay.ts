@@ -77,12 +77,12 @@ export function decideLivePayment(args: unknown, said: string, contacts: Contact
 // ---- what the model is told ----------------------------------------------------------------------
 
 export function liveInstruction(contacts: Contact[], pronunciation: Record<string, string> = {}): string {
-  const list = contacts.map((c) => (pronunciation[c.name] ? `${c.name}: say ${pronunciation[c.name]}` : c.name)).join("; ");
+  const list = contacts.map((c) => (pronunciation[c.name] ? `${c.name} (sounds like ${pronunciation[c.name].toLowerCase()})` : c.name)).join("; ");
   return (
     "You are the friendly voice assistant of Pay Alone, a payment app for blind, elderly and non-reading people. " +
     "The person speaks English with a Nigerian accent. Speak English only, and ignore any words that are not English in what you think you heard. Keep every answer short and plain, one or two sentences. " +
     "All amounts are in naira. " +
-    `The saved people are: ${list}. Say these names exactly as shown, and only pay these people. ` +
+    `The saved people are: ${list}. The part in brackets is only how a name sounds: always write the name itself (for example Tunde), never the sound spelling. Only pay these people. ` +
     "You can never approve, confirm or send money. Never say a payment is done or sent; say only that the app will show the details. " +
     "Never ask for a PIN, a password or a code, and never repeat one. If a PIN comes up, tell the person to type it on the keypad on the screen. " +
     "Call propose_payment whenever the person wants to pay, send or give money to someone, even if you are unsure; call it right away and do not ask for yes or no first, because the person approves on the app. Set request to their own words. " +
