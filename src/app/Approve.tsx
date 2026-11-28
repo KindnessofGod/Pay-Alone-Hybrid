@@ -14,6 +14,8 @@ import { bigAmount, isAmountView } from "@/lib/ui/amountview";
 import { approvalMessage } from "@/lib/ui/messages";
 import { pinAnnouncement, pinPress } from "@/lib/ui/pinpad";
 import { saveResume } from "@/lib/ui/resume";
+import type { Strip } from "@/lib/hybrid/strip";
+import { HybridStrip } from "./dash";
 import { FingerprintIcon, FingerprintWait, PayCard, ReceiptCard } from "./ui";
 
 type Phase = "connect" | "starting" | "set_pin" | "confirm_pin" | "pin" | "offer_pin" | "sending" | "done" | "stopped";
@@ -32,6 +34,8 @@ interface Props {
   onPaid?(): void;
   /** Language of the AI voice: our money sentences are spoken in it (English is the team's own wording, the rest machine-translated). */
   lang?: LangCode;
+  /** Which part worked where, and the Nano chip when Gemini Nano on this device agreed with Live. Nothing here approves anything. */
+  strip?: Strip;
 }
 
 interface Receipt {
@@ -51,7 +55,7 @@ function alreadyDeclined(): boolean {
   }
 }
 
-export default function Approve({ payeeId, amountMinor, shopRequestId, reference, speak, listen, onClose, onPaid, lang = "en" }: Props) {
+export default function Approve({ payeeId, amountMinor, shopRequestId, reference, speak, listen, onClose, onPaid, lang = "en", strip }: Props) {
   const S = stringsFor(lang);
   const [phase, setPhaseState] = useState<Phase>("starting");
   const phaseRef = useRef<Phase>("starting"); // the async steps below read the newest phase, not the one from when they started
@@ -444,6 +448,12 @@ export default function Approve({ payeeId, amountMinor, shopRequestId, reference
             <span>Fees included</span>
             {reference ? <span>Reference {reference}</span> : <span>From the wallet&apos;s quote</span>}
           </div>
+          {strip && (
+            <div className="hy-wrap">
+              {strip.chip && <p className="hy-chip"><span aria-hidden="true">✓</span> {strip.chip}</p>}
+              <HybridStrip strip={strip} />
+            </div>
+          )}
         </>
       )}
       <p className={quote && paymentPhase && message === quote.readBack ? "vh" : "msg"} aria-live="polite">{message}</p>

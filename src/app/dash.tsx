@@ -1,5 +1,6 @@
 // The customer home screen in the original Pay Alone look: dark icon rail, board of cards, lit voice panel.
 // Presentational only: page.tsx passes real data in, /design-preview passes fixed SAMPLE props.
+import type { Strip } from "@/lib/hybrid/strip";
 import { useEffect, type ReactNode, type Ref } from "react";
 import { bigAmount } from "@/lib/ui/amountview";
 import { type Amount } from "@/lib/money";
@@ -249,10 +250,34 @@ export function SafetyTiles({ fingerprint, limit, payCode, onSayCode }: { finger
 }
 
 /** The lit voice panel: orb, conversation, status, and the big lime mic. `children` is the conversation list. */
-export function VoicePanel({ mode, statusLabel, ai, children, hint, micLabel, micOn, onMic, typed, onTyped, onSubmit, inputRef, className = "" }: {
+/** Which part of the app works where: two small rows that light up while they work. Facts only (src/lib/hybrid/strip.ts). */
+export function HybridStrip({ strip, onRestore }: { strip: Strip; onRestore?: () => void }) {
+  const row = (r: Strip["voice"]) => (
+    <li className={r.lit ? "on" : ""}>
+      <span className="hy-dot" aria-hidden="true" />
+      <span className="hy-l">{r.label}</span>
+      <span className="hy-e">{r.engine} · {r.where}</span>
+    </li>
+  );
+  return (
+    <div className="hy" role="group" aria-label="How this is working">
+      <ul>
+        {row(strip.voice)}
+        {strip.voice.where === "cloud" ? row(strip.money) : null}
+      </ul>
+      {strip.offer && onRestore && (
+        <button type="button" className="hy-back" onClick={onRestore}>Back online. Use Gemini Live</button>
+      )}
+    </div>
+  );
+}
+
+export function VoicePanel({ mode, statusLabel, ai, strip, onRestore, children, hint, micLabel, micOn, onMic, typed, onTyped, onSubmit, inputRef, className = "" }: {
   mode: OrbMode;
   statusLabel: string;
   ai: { label: string; tone: string };
+  strip?: Strip;
+  onRestore?: () => void;
   children?: ReactNode;
   hint: string;
   micLabel: string;
@@ -288,6 +313,7 @@ export function VoicePanel({ mode, statusLabel, ai, children, hint, micLabel, mi
           <input ref={inputRef} aria-label="Or type what you want to do" placeholder="Or type here" value={typed} onChange={(e) => onTyped?.(e.target.value)} onKeyDown={(e) => e.key === "Enter" && onSubmit?.()} />
           <button type="button" onClick={() => onSubmit?.()}>Go</button>
         </div>
+        {strip ? <HybridStrip strip={strip} onRestore={onRestore} /> : null}
         <p className={`vp-ai tone-${ai.tone}`}>{ai.label}</p>
       </div>
     </aside>

@@ -186,6 +186,12 @@ describe("full step log: every client event, only its own checked fields", () =>
     expect(v({ event: "live_turn", who: "person", chars: 24, text: "send 5000 to Tunde" })).toEqual({ event: "live_turn", fields: { outcome: "ok", who: "person", chars: 24 } });
     expect(v({ event: "live_turn", who: "Tunde", chars: 2 })).toBeNull();
     expect(v({ event: "live_tool", shown: false, reason: "amount_not_heard" })).toEqual({ event: "live_tool", fields: { outcome: "ok", shown: false, reason: "amount_not_heard" } });
+    expect(v({ event: "live_check", result: "agree", source: "on_device", text: "send 5000 to Tunde" })).toEqual({ event: "live_check", fields: { outcome: "ok", result: "agree", source: "on_device" } });
+    expect(v({ event: "live_check", result: "mismatch", source: "cloud" })).toEqual({ event: "live_check", fields: { outcome: "ok", result: "mismatch", source: "cloud" } });
+    expect(v({ event: "live_check", result: "yes", source: "on_device" })).toBeNull();
+    expect(v({ event: "handoff", to: "device", reason: "offline", name: "Tunde" })).toEqual({ event: "handoff", fields: { outcome: "ok", to: "device", reason: "offline" } });
+    expect(v({ event: "handoff", to: "mars", reason: "offline" })).toBeNull();
+    expect(v({ event: "handoff", to: "cloud", reason: "has digits 12" })).toBeNull();
     expect(v({ event: "client_error", where: "understand", code: "failed" })).toEqual({ event: "client_error", fields: { outcome: "fail", where: "understand", code: "failed" } });
   });
 

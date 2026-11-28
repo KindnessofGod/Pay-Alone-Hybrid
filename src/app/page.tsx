@@ -30,6 +30,9 @@ import History, { useHistory } from "./History";
 import { takeResume, type Resume } from "@/lib/ui/resume";
 import { liveEnabled } from "@/lib/hybrid/live";
 import { useLive } from "./useLive";
+import { runDeviceCheck, type DeviceCheckResult } from "@/lib/hybrid/nanocheck";
+import { initialHandoff, stepHandoff, type HandoffEvent } from "@/lib/hybrid/handoff";
+import { hybridStrip } from "@/lib/hybrid/strip";
 import PayCode, { usePayCode } from "./PayCode";
 import { answerToRequest, payCodeSpeech, requestPrompt } from "@/lib/ui/requestprompt";
 import { bigAmount } from "@/lib/ui/amountview";
@@ -61,7 +64,7 @@ export default function Home() {
   const [typed, setTyped] = useState("");
   const [result, setResult] = useState<Understood | null>(null);
   const [ms, setMs] = useState(0);
-  const [approving, setApproving] = useState<{ payeeId: string; amountMinor: string; key: number; shopRequestId?: string; reference?: string } | null>(null);
+  const [approving, setApproving] = useState<{ payeeId: string; amountMinor: string; key: number; shopRequestId?: string; reference?: string; nanoChecked?: boolean } | null>(null);
   const [incoming, setIncoming] = useState<ShopReq | null>(null); // a shop is asking this person to pay
   const [requestBusy, setRequestBusy] = useState(false);
   const [working, setWorking] = useState("");
@@ -142,7 +145,7 @@ export default function Home() {
 
   // One natural voice: while Live is running, OUR sentences are read by Live's voice (live.speakExact checks word for
   // word that it said exactly our template). If it said anything else, or there is no Live session, our own voice speaks.
-  const liveRef = useRef<{ active: boolean; speakExact: (t: string) => Promise<"spoken" | "mismatch" | "failed"> } | null>(null);
+  const liveRef = useRef<{ active: boolean; stop: () => Promise<void>; speakExact: (t: string) => Promise<"spoken" | "mismatch" | "failed"> } | null>(null);
   const speak = useCallback(async (t: string) => {
     if (isEmbedMuted()) return;
     const t0 = performance.now();
@@ -185,6 +188,13 @@ export default function Home() {
       /* English */
     }
   }, []);
+  // Hybrid strip facts: the last Nano double-check on a Live payment, and whether one is running now.
+  const [lastCheck, setLastCheck] = useState<DeviceCheckResult | null>(null);
+  const [checking, setChecking] = useState(false);
+  // Cloud <-> device handoff (src/lib/hybrid/handoff.ts). The dispatcher is filled in below, once speak and talk exist.
+  const [hand, setHand] = useState(initialHandoff);
+  const handRef = useRef(hand);
+  const dispatchHand = useRef<(e: HandoffEvent) => void>(() => undefined);
   const liveSettings = useRef<{ policy: Policy; limitMinor: string; nano: string }>({ policy, limitMinor, nano });
   liveSettings.current = { policy, limitMinor, nano };
   const live = useLive({
@@ -200,14 +210,26 @@ export default function Home() {
       });
     },
     limitMinor: () => liveSettings.current.limitMinor,
+    // Gemini Nano on THIS device reads the same words again, before the card. ONLY_ON_DEVICE: the cloud is never used here.
+    deviceCheck: async (said, lp) => {
+      const c = liveSettings.current;
+      setChecking(true);
+      try {
+        return await runDeviceCheck(said, { contacts: CONTACTS, limitMinor: c.limitMinor, live: lp, deviceAvailable: c.nano === "available" || c.nano === "warming up", engines: firebaseEngines });
+      } finally {
+        setChecking(false);
+      }
+    },
+    onCheck: setLastCheck,
+    onClosed: () => dispatchHand.current({ type: "live_closed", online: typeof navigator === "undefined" ? true : navigator.onLine }),
     // Opens the existing Approve card (server quote, fingerprint or PIN). The read-back is our own template.
-    present: async (r, said) => {
+    present: async (r, said, meta) => {
       const o = dialogNext(dialog.current, r, { contacts: CONTACTS, said, limitMinor: liveSettings.current.limitMinor });
       dialog.current = o.state;
       if (!(o.then === "approve" && o.approve)) return false;
       seq.current++;
       setResult(r);
-      setApproving({ ...o.approve, key: Date.now() });
+      setApproving({ ...o.approve, key: Date.now(), nanoChecked: meta?.deviceCheck === "agree" });
       return true;
     },
     onTripwire: (secret) => {
@@ -226,6 +248,35 @@ export default function Home() {
   });
 
   liveRef.current = live;
+
+  // Offline (or Live closing) hands the voice to the on-device loop: Web Speech with processLocally, Gemini Nano, browser voice.
+  const begunRef = useRef(false);
+  dispatchHand.current = (e) => {
+    const r = stepHandoff(handRef.current, e);
+    handRef.current = r.state;
+    setHand(r.state);
+    if (r.log) reportEvent({ event: "handoff", to: r.log.to, reason: r.log.reason }); // fixed words only
+    if (!begunRef.current) return;
+    if (r.say) {
+      addTurn("app", r.say);
+      void speak(r.say).catch(() => undefined);
+    }
+    if (r.log?.to === "device") {
+      if (liveRef.current?.active) void liveRef.current.stop();
+      setTimeout(() => void talkRef.current(true), 1500); // the on-device loop listens (it does nothing if on-device speech is not ready)
+    }
+  };
+  useEffect(() => {
+    const go = () => dispatchHand.current({ type: "offline" });
+    const back = () => dispatchHand.current({ type: "online" });
+    window.addEventListener("offline", go);
+    window.addEventListener("online", back);
+    if (!navigator.onLine) go();
+    return () => {
+      window.removeEventListener("offline", go);
+      window.removeEventListener("online", back);
+    };
+  }, []);
 
   type Settings = { policy: Policy; limitMinor: string; nano: string };
 
@@ -591,7 +642,8 @@ export default function Home() {
   }, []);
 
   // The voice conversation. Live is the default; if it cannot connect, the older Web Speech path takes over.
-  const liveUsable = liveOn && !live.failed;
+  begunRef.current = begun;
+  const liveUsable = liveOn && (hand.mode === "cloud" ? !live.failed : hand.offer);
   const startLive = useCallback(async (): Promise<boolean> => {
     stopListening();
     lastInput.current = "typed"; // the normal hands-free loop stays off while Live is the voice
@@ -601,7 +653,9 @@ export default function Home() {
     } catch {
       ls = undefined;
     }
-    return live.start(langRef.current, ls ? openingTurn(ls) : APP_OPENED_AGAIN);
+    const ok = await live.start(langRef.current, ls ? openingTurn(ls) : APP_OPENED_AGAIN);
+    if (ok) dispatchHand.current({ type: "live_started" });
+    return ok;
   }, [live]);
 
   /** First key press or tap: connect Live (inside the gesture, so sound and the microphone are allowed), then it greets first. */
@@ -767,6 +821,11 @@ export default function Home() {
   const quiet = turns.length === 0 && !approving && !consent && !listening;
   const lastIsApp = turns.length > 0 && turns[turns.length - 1].who === "app";
 
+  const nanoUsable = nano === "available" || nano === "warming up";
+  const stripMode = hand.mode === "cloud" && !live.failed ? "cloud" : "device";
+  const stripFacts = { mode: stripMode, liveActive: live.active, nanoUsable, checking, offer: hand.offer } as const;
+  const panelStrip = hybridStrip({ ...stripFacts, lastCheck });
+  const approveStrip = hybridStrip({ ...stripFacts, checking: false, lastCheck: approving?.nanoChecked ? { result: "agree", source: "on_device" } : null });
   const approveEl = approving ? (
             <Approve
               key={approving.key}
@@ -776,6 +835,7 @@ export default function Home() {
               reference={approving.reference}
               speak={speak}
               lang={lang}
+              strip={approveStrip}
               onPaid={() => setHistoryKey((k) => k + 1)}
               listen={(() => {
                 const m = speechMode(speech === "checking" ? "none" : speech, cloudSpeech);
@@ -1045,7 +1105,9 @@ export default function Home() {
         <VoicePanel
           mode={orbMode}
           statusLabel={statusLabel}
-          ai={aiPill(nano, liveUsable)}
+          ai={aiPill(nano, liveUsable && hand.mode === "cloud")}
+          strip={panelStrip}
+          onRestore={() => void toggleLive()}
           hint={hint}
           micLabel={micLabel}
           micOn={listening || live.active}

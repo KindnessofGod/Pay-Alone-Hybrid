@@ -9,6 +9,8 @@ import { leftThisWeek, weekBars, type SummaryReceipt } from "@/lib/ui/summary";
 import { nairaOf } from "@/lib/money";
 import History, { type HistoryState } from "../History";
 import { PayCodeView } from "../ui";
+import { HybridStrip } from "../dash";
+import { hybridStrip } from "@/lib/hybrid/strip";
 
 export type PreviewState = "idle" | "listening" | "chat" | "request" | "approve" | "pin" | "paid" | "setup" | "settings" | "history" | "unconnected";
 
@@ -26,7 +28,19 @@ function sample(now: number) {
   return list;
 }
 
-export function PreviewDash({ state = "idle", tab = "home" }: { state?: PreviewState; tab?: "home" | "talk" }) {
+/** SAMPLE hybrid strip states for screenshots: "agree" (Gemini Live + Nano agreed), "checking", "offline" (on-device loop), "rules" (no Nano). */
+export type PreviewHybrid = "agree" | "checking" | "offline" | "rules";
+function sampleStrip(hy: PreviewHybrid | undefined) {
+  const base = { mode: "cloud", liveActive: true, nanoUsable: true, checking: false, offer: false, lastCheck: null } as const;
+  if (hy === "agree") return hybridStrip({ ...base, lastCheck: { result: "agree", source: "on_device" } });
+  if (hy === "checking") return hybridStrip({ ...base, checking: true });
+  if (hy === "offline") return hybridStrip({ ...base, mode: "device", liveActive: false });
+  if (hy === "rules") return hybridStrip({ ...base, nanoUsable: false, lastCheck: { result: "unavailable", source: "rules" } });
+  return hybridStrip(base);
+}
+
+export function PreviewDash({ state = "idle", tab = "home", hy }: { state?: PreviewState; tab?: "home" | "talk"; hy?: PreviewHybrid }) {
+  const strip = sampleStrip(hy);
   const now = Date.now();
   const receipts = sample(now);
   const wallet = state === "unconnected" ? null : { connected: true, cap: usd("5000"), interval: `R/${new Date(now - 2 * DAY).toISOString().replace(/\.\d{3}Z$/, "Z")}/P1W` };
@@ -56,7 +70,8 @@ export function PreviewDash({ state = "idle", tab = "home" }: { state?: PreviewS
       <VoicePanel
         mode={listening ? "listening" : "idle"}
         statusLabel={listening ? "Listening" : "Ready"}
-        ai={{ label: "Voice online (Gemini Live) · money checked on this device", tone: "cloud" }}
+        ai={hy === "offline" ? { label: "Offline · AI on this device", tone: "ok" } : { label: "Voice online (Gemini Live) · money checked on this device", tone: "cloud" }}
+        strip={strip}
         hint={listening ? "Listening. Press Space to pause" : "Tap to talk"}
         micLabel="Press to talk"
         micOn={listening}
@@ -79,7 +94,7 @@ export function PreviewDash({ state = "idle", tab = "home" }: { state?: PreviewS
         )}
         {(state === "chat" || state === "approve" || state === "pin") && (
           <ol className="chat" aria-label="Live conversation">
-            <Bubble who="app" chip={<span className="chipstatic tone-cloud"><span aria-hidden="true">🎙</span> Gemini Live (Google, online)</span>}>Hello. What would you like to do?</Bubble>
+            <Bubble who="app" chip={hy === "offline" ? <Chip source="on_device" /> : <span className="chipstatic tone-cloud"><span aria-hidden="true">🎙</span> Gemini Live (Google, online)</span>}>Hello. What would you like to do?</Bubble>
             <Bubble who="you">Send two thousand naira to Tunde</Bubble>
             <Bubble who="app" chip={<Chip source="rules" />}>Please check the card, then approve with your fingerprint.</Bubble>
           </ol>
@@ -103,6 +118,10 @@ export function PreviewDash({ state = "idle", tab = "home" }: { state?: PreviewS
             <p className="note">about ₦{nairaOf(quoteDebit)}</p>
             <p className="to">to Tunde</p>
             <div className="meta"><span>Fees included</span><span>From the wallet&apos;s quote</span></div>
+            <div className="hy-wrap">
+              {strip.chip && <p className="hy-chip"><span aria-hidden="true">✓</span> {strip.chip}</p>}
+              <HybridStrip strip={strip} />
+            </div>
             <div className="stack">
               <button type="button" className="btn primary"><FingerprintIcon /> Approve with fingerprint</button>
               <button type="button" className="btn ghost">Use my PIN instead</button>

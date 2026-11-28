@@ -13,6 +13,7 @@ import { spokenSecret, type SecretKind } from "./tripwire";
 import type { Understood } from "./understand";
 import type { Contact } from "./crosscheck";
 import { decideLivePayment, promisesDetails } from "./livepay";
+import type { DeviceCheckResult } from "./nanocheck";
 import { exactInstruction, matchesTemplate, stillOnTrack } from "./exact";
 
 export const LIVE_MODEL = "gemini-3.1-flash-live-preview"; // first Gemini Developer API model on firebase.google.com/docs/ai-logic/live-api
@@ -100,8 +101,15 @@ export interface ToolDeps {
   contacts: Contact[];
   limitMinor: () => string;
   /** Opens the existing Approve card. False if the app could not (the dialog said no). */
-  present: (r: ProposalResult, said: string) => Promise<boolean>;
+  present: (r: ProposalResult, said: string, meta?: { deviceCheck: "agree" | "unavailable" }) => Promise<boolean>;
   onTripwire: (secret: SecretKind) => void;
+  /**
+   * Gemini Nano on this device reads the same transcript again (nanocheck.ts). Runs after the plain-code check and
+   * before the card. Without it (tests, no Nano) the card opens on the plain-code check alone, marked "rules".
+   */
+  deviceCheck?: (said: string, live: { amountMinor: string; payeeId: string }) => Promise<DeviceCheckResult>;
+  /** The check's outcome, for the audit event and the strip: a fixed word, no content. */
+  onCheck?: (c: DeviceCheckResult) => void;
 }
 
 /** The arguments are checked in plain code against our own transcript (livepay.ts); they never open anything alone. */
@@ -128,9 +136,20 @@ export async function handleToolCall(call: { name: string; args?: unknown }, d: 
     }
   }
   if (!v.ok) return { kind: "response", response: { shown: false, reason: v.reason, ...(v.names ? { names: v.names } : {}) } };
-  const r: ProposalResult = { kind: "proposal", proposal: v.proposal, needsApproval: true, source: "rules" };
+  let check: DeviceCheckResult = { result: "unavailable", source: "rules" };
+  if (d.deviceCheck) {
+    try {
+      check = await d.deviceCheck(used, { amountMinor: v.proposal.amountMinor, payeeId: v.proposal.payeeId });
+    } catch {
+      /* a failed check is "unavailable", never a block and never a pass */
+    }
+    d.onCheck?.(check);
+    if (check.result === "mismatch") return { kind: "response", response: { shown: false, reason: "device_check_mismatch" } };
+  }
+  const agreed = check.result === "agree";
+  const r: ProposalResult = { kind: "proposal", proposal: v.proposal, needsApproval: true, source: agreed ? "on_device" : "rules" };
   try {
-    const ok = await d.present(r, used);
+    const ok = d.deviceCheck ? await d.present(r, used, { deviceCheck: agreed ? "agree" : "unavailable" }) : await d.present(r, used);
     return { kind: "response", response: ok ? { shown: true } : { shown: false, reason: "not_ready" } };
   } catch {
     return { kind: "response", response: { shown: false, reason: "failed" } };
@@ -160,6 +179,8 @@ export interface LiveDeps {
   contacts: Contact[];
   limitMinor: () => string;
   present: ToolDeps["present"];
+  deviceCheck?: ToolDeps["deviceCheck"];
+  onCheck?: ToolDeps["onCheck"];
   /** Fallback only: the existing understand() path, used when the model promised details but never called the tool. */
   understand?: (said: string) => Promise<Understood>;
   /** Every tool call, answered: for the audit event (shown, reason) and the ?debug=1 panel (raw, memory only). */
@@ -341,8 +362,10 @@ export function runLive(session: LiveSessionLike, d: LiveDeps, opts: { startMute
             recentInputs: () => turns.filter((t) => t.who === "you").slice(-3).map((t) => t.text.trim()),
             contacts: d.contacts,
             limitMinor: d.limitMinor,
-            present: async (r, said) => {
-              const ok = await d.present(r, said);
+            deviceCheck: d.deviceCheck,
+            onCheck: d.onCheck,
+            present: async (r, said, meta) => {
+              const ok = await d.present(r, said, meta);
               if (ok) {
                 holds.card = true; // no audio goes to Live while the card is open
                 syncGate();

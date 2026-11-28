@@ -46,6 +46,8 @@ const STEP_EVENTS: Record<string, { fields?: Record<string, Check>; optional?: R
   read_receipt: {},
   demo_opened: {}, // the /demo page was opened (id only; the server adds the user id)
   live_tool: { fields: { shown: bool, reason: word } },
+  live_check: { fields: { result: oneOf("agree", "mismatch", "unavailable"), source: oneOf(...SOURCES) } }, // the Nano double-check on a Live payment: a fixed word, no content
+  handoff: { fields: { to: oneOf("device", "cloud"), reason: oneOf("offline", "live_closed", "restored") } }, // cloud <-> device voice switch
   template_mismatch: {}, // Live said something other than our template and our own voice took over: a count, never the words
   live_turn: { fields: { who: oneOf("person", "assistant"), chars: int(100_000) } },
   client_error: { outcome: "fail", fields: { where: word, code: word } },

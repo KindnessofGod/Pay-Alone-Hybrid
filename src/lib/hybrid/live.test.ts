@@ -141,6 +141,52 @@ describe("handleToolCall", () => {
     const d = toolDeps({ present: vi.fn(async () => { throw new Error("boom"); }) });
     expect(await handleToolCall({ name: "propose_payment", args: args() }, d)).toEqual({ kind: "response", response: { shown: false, reason: "failed" } });
   });
+  describe("Nano double-check before the card", () => {
+    const agree = { result: "agree" as const, source: "on_device" as const };
+    it("agree: the card opens with source on_device and the check is reported", async () => {
+      const deviceCheck = vi.fn(async () => agree);
+      const onCheck = vi.fn();
+      const d = toolDeps({ deviceCheck, onCheck });
+      const r = await handleToolCall({ name: "propose_payment", args: args() }, d);
+      expect(deviceCheck).toHaveBeenCalledWith("send 2000 naira to Tunde", { amountMinor: "200000", payeeId: "c2" });
+      expect(d.present).toHaveBeenCalledWith(expect.objectContaining({ source: "on_device" }), "send 2000 naira to Tunde", { deviceCheck: "agree" });
+      expect(onCheck).toHaveBeenCalledWith(agree);
+      expect(r).toEqual({ kind: "response", response: { shown: true } });
+    });
+    it("mismatch: no card, device_check_mismatch, reported", async () => {
+      const onCheck = vi.fn();
+      const d = toolDeps({ deviceCheck: async () => ({ result: "mismatch" as const, source: "on_device" as const }), onCheck });
+      const r = await handleToolCall({ name: "propose_payment", args: args() }, d);
+      expect(d.present).not.toHaveBeenCalled();
+      expect(r).toEqual({ kind: "response", response: { shown: false, reason: "device_check_mismatch" } });
+      expect(onCheck).toHaveBeenCalledWith({ result: "mismatch", source: "on_device" });
+    });
+    it("unavailable: the card still opens, honestly marked rules", async () => {
+      const onCheck = vi.fn();
+      const d = toolDeps({ deviceCheck: async () => ({ result: "unavailable" as const, source: "rules" as const }), onCheck });
+      const r = await handleToolCall({ name: "propose_payment", args: args() }, d);
+      expect(d.present).toHaveBeenCalledWith(expect.objectContaining({ source: "rules" }), "send 2000 naira to Tunde", { deviceCheck: "unavailable" });
+      expect(onCheck).toHaveBeenCalledWith({ result: "unavailable", source: "rules" });
+      expect(r).toEqual({ kind: "response", response: { shown: true } });
+    });
+    it("a check that throws counts as unavailable, never as a block", async () => {
+      const d = toolDeps({ deviceCheck: async () => { throw new Error("x"); } });
+      expect(await handleToolCall({ name: "propose_payment", args: args() }, d)).toEqual({ kind: "response", response: { shown: true } });
+    });
+    it("plain-code failure never reaches the check", async () => {
+      const deviceCheck = vi.fn();
+      const d = toolDeps({ deviceCheck, latestInput: () => "send some money to Tunde" });
+      await handleToolCall({ name: "propose_payment", args: args() }, d);
+      expect(deviceCheck).not.toHaveBeenCalled();
+    });
+    it("the PIN tripwire runs before the check", async () => {
+      const deviceCheck = vi.fn();
+      const d = toolDeps({ deviceCheck, latestInput: () => "my pin is 4 8 2 6" });
+      const r = await handleToolCall({ name: "propose_payment", args: args() }, d);
+      expect(r.kind).toBe("tripwire");
+      expect(deviceCheck).not.toHaveBeenCalled();
+    });
+  });
   it("spoken PIN in the transcript: tripwire, nothing checked, no response", async () => {
     const d = toolDeps({ latestInput: () => "my pin is 4 8 2 6" });
     const r = await handleToolCall({ name: "propose_payment", args: args() }, d);

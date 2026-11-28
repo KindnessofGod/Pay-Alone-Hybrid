@@ -5,8 +5,13 @@ import { closeCodeOf, liveErrorCode, runLive, sanitizeReason, type LiveControlle
 import { createPlayer, startMic } from "@/lib/hybrid/liveAudio";
 import { reportEvent } from "@/lib/firebase/client";
 import type { LangCode } from "@/lib/hybrid/languages";
+import type { DeviceCheckResult } from "@/lib/hybrid/nanocheck";
 
-export type LiveHandlers = Pick<LiveDeps, "contacts" | "limitMinor" | "present" | "understand" | "onTripwire"> & {
+export type LiveHandlers = Pick<LiveDeps, "contacts" | "limitMinor" | "present" | "understand" | "onTripwire" | "deviceCheck"> & {
+  /** The Nano double-check finished (agree, mismatch or unavailable). A fixed word; the page lights the strip. */
+  onCheck?: (c: DeviceCheckResult) => void;
+  /** Live ended by itself (socket closed or failed), not because the person stopped it. */
+  onClosed?: () => void;
   pronunciation?: Record<string, string>;
   /** Short, plain message for the screen when Live cannot run; the normal flow stays available. */
   onProblem: (say: string) => void;
@@ -48,6 +53,7 @@ export function useLive(handlers: LiveHandlers) {
   const start = useCallback(async (lang: LangCode, opening: string): Promise<boolean> => {
     if (ctrl.current) return true;
     setPausedState(false);
+    setFailed(false);
     setTurns([]);
     setToolLog([]);
     let stopMic: (() => void) | undefined;
@@ -73,8 +79,13 @@ export function useLive(handlers: LiveHandlers) {
         contacts: h.current.contacts,
         understand: (said) => h.current.understand!(said),
         limitMinor: () => h.current.limitMinor(),
-        present: async (r, said) => {
-          const ok = await h.current.present(r, said);
+        deviceCheck: h.current.deviceCheck ? (said, lp) => h.current.deviceCheck!(said, lp) : undefined,
+        onCheck: (c) => {
+          reportEvent({ event: "live_check", result: c.result, source: c.source }); // a fixed word and a source, no content
+          h.current.onCheck?.(c);
+        },
+        present: async (r, said, meta) => {
+          const ok = await h.current.present(r, said, meta);
           if (ok) p.flush(); // anything the model already queued is cut; our own read-back is next
           return ok;
         },
@@ -108,6 +119,7 @@ export function useLive(handlers: LiveHandlers) {
             setFailed(true);
             h.current.onProblem(SAY[code ?? "other"] ?? SAY.other);
           } else reportEvent({ event: "live_session", outcome: "ended", ...(code ? { code } : {}) });
+          if (how === "error" || (how === "ended" && !code)) h.current.onClosed?.(); // not stopped by the person, not the PIN tripwire
         },
       });
       ctrl.current = c;

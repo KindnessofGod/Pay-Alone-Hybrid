@@ -354,3 +354,17 @@ html[data-embed] .dash{height:100dvh}
 .pill.ghost,.pill.ghost:hover{background:transparent}
 .pill.ghost:hover{background:rgba(255,255,255,.08)}
 @media (max-width:1023px){.dash[data-tab=talk] .voice-panel{padding-bottom:6.5rem}}
+
+/* Hybrid strip: which part works where. Calm, small; lit dot = working now. */
+.hy{--hy-on:var(--lime);width:100%;display:grid;gap:.35rem;justify-items:center}
+.hy ul{list-style:none;margin:0;padding:0;display:grid;gap:.25rem;width:100%}
+.hy li{display:flex;align-items:center;gap:.5rem;font-size:.74rem;line-height:1.25;padding:.3rem .65rem;border-radius:.7rem;background:rgba(255,255,255,.08);color:rgba(255,255,255,.7)}
+.hy li.on{background:rgba(195,232,143,.14);color:#fff}
+.hy-dot{flex:none;width:.5rem;height:.5rem;border-radius:50%;background:rgba(255,255,255,.3)}
+.hy li.on .hy-dot{background:var(--hy-on);box-shadow:0 0 8px var(--hy-on)}
+.hy-l{font-weight:700;white-space:nowrap}
+.hy-e{margin-left:auto;text-align:right}
+.hy-back{min-height:2.4rem;padding:0 1rem;border-radius:999px;background:var(--lime);color:var(--deep);font-weight:700;font-size:.82rem}
+.pay .hy-wrap{display:grid;gap:.5rem;margin:.2rem 0 .6rem}
+.hy-chip{margin:0;justify-self:center;display:inline-flex;gap:.4rem;align-items:center;font-size:.8rem;font-weight:700;padding:.3rem .8rem;border-radius:999px;background:rgba(195,232,143,.16);color:var(--lime)}
+@media (prefers-reduced-motion:no-preference){.hy li,.hy-dot{transition:background .3s,box-shadow .3s}}

@@ -22,7 +22,7 @@ function Mock() {
     );
   }
   const s: PreviewState = state === "approving" ? "approve" : state === "request" ? "request" : state === "paid" ? "paid" : "idle";
-  return <PreviewDash state={s} tab={q.get("tab") === "talk" ? "talk" : "home"} />;
+  return <PreviewDash state={s} tab={q.get("tab") === "talk" ? "talk" : "home"} hy={state === "approving" ? "agree" : undefined} />;
 }
 
 export default function DemoMock() {

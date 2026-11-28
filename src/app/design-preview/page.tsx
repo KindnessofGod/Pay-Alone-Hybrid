@@ -10,7 +10,7 @@ import { notFound, useSearchParams } from "next/navigation";
 import { LanguagePicker, SetupView, StartLayer, PayCodeView, PrivacyCard } from "../ui";
 import { ShopForm, ShopShell, ShopStatus } from "../shop/ShopView";
 import { shopStatusView } from "@/lib/ui/requestprompt";
-import { PreviewDash, type PreviewState } from "./PreviewDash";
+import { PreviewDash, type PreviewHybrid, type PreviewState } from "./PreviewDash";
 
 const SAMPLE = { value: "200000", assetCode: "NGN", assetScale: 2 };
 const VIEWS: PreviewState[] = ["idle", "listening", "chat", "request", "approve", "pin", "paid", "setup", "settings", "history", "unconnected"];
@@ -36,7 +36,7 @@ function Preview() {
   const view = q.get("view");
   if (view === "start") return <StartLayer inline lang="en" />;
   if (view === "shop") return <Shop state={q.get("state") ?? "form"} />;
-  if (view && (VIEWS as string[]).includes(view)) return <PreviewDash state={view as PreviewState} tab={q.get("tab") === "talk" ? "talk" : "home"} />;
+  if (view && (VIEWS as string[]).includes(view)) return <PreviewDash state={view as PreviewState} tab={q.get("tab") === "talk" ? "talk" : "home"} hy={["agree", "checking", "offline", "rules"].includes(q.get("hy") ?? "") ? (q.get("hy") as PreviewHybrid) : undefined} />;
   return (
     <>
       <div className="banner" role="note">Design preview, sample data</div>
