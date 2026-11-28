@@ -45,6 +45,7 @@ const STEP_EVENTS: Record<string, { fields?: Record<string, Check>; optional?: R
   history_load: { fields: { count: int(1000), ms: int(3_600_000) } },
   read_receipt: {},
   live_tool: { fields: { shown: bool, reason: word } },
+  live_turn: { fields: { who: oneOf("person", "assistant"), chars: int(100_000) } },
   client_error: { outcome: "fail", fields: { where: word, code: word } },
 };
 

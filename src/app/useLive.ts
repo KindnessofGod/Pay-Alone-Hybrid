@@ -5,7 +5,8 @@ import { closeCodeOf, liveErrorCode, runLive, sanitizeReason, type LiveControlle
 import { createPlayer, startMic } from "@/lib/hybrid/liveAudio";
 import { reportEvent } from "@/lib/firebase/client";
 
-export type LiveHandlers = Pick<LiveDeps, "understand" | "present" | "onTripwire"> & {
+export type LiveHandlers = Pick<LiveDeps, "contacts" | "limitMinor" | "present" | "understand" | "onTripwire"> & {
+  pronunciation?: Record<string, string>;
   /** Short, plain message for the screen when Live cannot run; the normal flow stays available. */
   onProblem: (say: string) => void;
 };
@@ -25,6 +26,8 @@ export function useLive(handlers: LiveHandlers) {
   const [active, setActive] = useState(false);
   const [turns, setTurns] = useState<LiveTurn[]>([]);
   const [failed, setFailed] = useState(false);
+  // ?debug=1 only: raw tool calls and what this session heard. Memory only, never sent anywhere, gone on reload.
+  const [toolLog, setToolLog] = useState<{ call: { name: string; args?: unknown }; response: unknown }[]>([]);
 
   const teardown = useCallback(() => {
     stopAudio.current();
@@ -40,6 +43,7 @@ export function useLive(handlers: LiveHandlers) {
   const start = useCallback(async () => {
     if (ctrl.current) return;
     setTurns([]);
+    setToolLog([]);
     let stopMic: (() => void) | undefined;
     let player: ReturnType<typeof createPlayer> | undefined;
     let stage: "mic" | "player" | "connect" | "session" = "player";
@@ -58,16 +62,23 @@ export function useLive(handlers: LiveHandlers) {
       stopMic = await startMic((b) => ctrl.current?.sendMic(b));
       stage = "connect";
       const { connectLive } = await import("@/lib/firebase/live");
-      const session = await connectLive();
+      const session = await connectLive(h.current.contacts, h.current.pronunciation);
       const p = player;
       const c = runLive(session, {
-        understand: (said) => h.current.understand(said),
+        contacts: h.current.contacts,
+        understand: (said) => h.current.understand!(said),
+        limitMinor: () => h.current.limitMinor(),
         present: async (r, said) => {
           const ok = await h.current.present(r, said);
-          reportEvent({ event: "live_tool", shown: ok, reason: ok ? "approve_card" : "no_payment" });
           if (ok) p.flush(); // anything the model already queued is cut; our own read-back is next
           return ok;
         },
+        // Counts and fixed words only: no names, no amounts, no sentences.
+        onTool: (e) => {
+          reportEvent({ event: "live_tool", shown: e.shown, reason: e.reason });
+          setToolLog((l) => [...l, { call: { name: e.call.name, args: e.call.args }, response: e.response }]);
+        },
+        onTurnDone: (who, chars) => reportEvent({ event: "live_turn", who, chars }),
         onTurns: setTurns,
         onTripwire: (s) => {
           p.flush();
@@ -104,5 +115,5 @@ export function useLive(handlers: LiveHandlers) {
 
   const resume = useCallback(() => ctrl.current?.resume(), []);
   useEffect(() => () => void ctrl.current?.stop(), []);
-  return { active, turns, failed, start, stop, resume };
+  return { active, turns, failed, toolLog, start, stop, resume };
 }

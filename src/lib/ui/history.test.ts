@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { activityLine, badgeOf, debugLine, receiptSentence, type ReceiptView } from "./history";
+import { activityLine, badgeOf, debugLine, debugRow, receiptSentence, type ReceiptView } from "./history";
 
 const r: ReceiptView = { id: "rcpt_a", payeeName: "Mama Ade", debit: { value: "502000", assetCode: "NGN", assetScale: 2 }, method: "pin", simulated: true, createdAt: "2026-11-27T10:05:00.000Z" };
 
@@ -38,5 +38,24 @@ describe("debug log lines (the person's own last 50 events)", () => {
   it("never prints a field it does not know (no user id, no free text)", () => {
     const l = debugLine({ at: "2026-11-27T10:05:00.000Z", event: "x", outcome: "ok", userId: "u1", said: "my pin is 1234" } as never);
     expect(l).not.toMatch(/u1|1234|said/);
+  });
+});
+
+describe("debug rows always have visible text", () => {
+  it("shows time, event, status and reason", () => {
+    const r = debugRow({ at: "2026-11-27T10:05:00.000Z", event: "live_tool", outcome: "ok", reason: "amount_not_heard", t: 900, shown: false });
+    expect(r).toMatchObject({ event: "live_tool", status: "ok", reason: "amount not heard" });
+    expect(r.time).toBe("t=900");
+    expect(r.text.length).toBeGreaterThan(0);
+  });
+  it("outcome fail reads as error", () => {
+    expect(debugRow({ at: "2026-11-27T10:05:00.000Z", event: "speak", outcome: "fail" }).status).toBe("error");
+  });
+  it("a row with missing or odd fields still prints something", () => {
+    for (const bad of [{}, { at: "nope" }, { at: { seconds: 1 }, event: 5 }, { event: "x" }] as never[]) {
+      const r = debugRow(bad);
+      expect(r.text.trim().length, JSON.stringify(bad)).toBeGreaterThan(0);
+      expect(r.event.length).toBeGreaterThan(0);
+    }
   });
 });
