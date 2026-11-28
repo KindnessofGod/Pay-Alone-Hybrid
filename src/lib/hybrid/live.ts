@@ -215,12 +215,14 @@ export function runLive(session: LiveSessionLike, d: LiveDeps, opts: { startMute
   let exact: Exact | null = null;
   let restoreMuted: boolean | null = null; // set after an aborted read: drop the rest of that turn, then go back to this
   let exactQueue: Promise<unknown> = Promise.resolve();
+  const turnWaiters: (() => void)[] = []; // sendText(..., {wait}) callers, released when a model turn completes
 
   const finish = async (how: LiveEnd, code?: string, detail?: { reason: string; closeCode?: number }) => {
     if (ended) return;
     ended = true;
     gate.pause();
     exact?.done("failed");
+    turnWaiters.splice(0).forEach((r) => r());
     try {
       await session.close();
     } catch {
@@ -322,6 +324,7 @@ export function runLive(session: LiveSessionLike, d: LiveDeps, opts: { startMute
         d.onTurnDone?.(turns[counted].who === "you" ? "person" : "assistant", turns[counted].text.length);
         counted++;
       }
+      if (c.turnComplete) turnWaiters.splice(0).forEach((r) => r());
       if (c.turnComplete && restoreMuted !== null) {
         muted = restoreMuted;
         restoreMuted = null;
@@ -394,8 +397,11 @@ export function runLive(session: LiveSessionLike, d: LiveDeps, opts: { startMute
     },
     isUserPaused: () => holds.user,
     /** A plain client text turn (e.g. "[app opened]"). Never contains the person's money details. */
-    sendText: async (text: string) => {
-      if (!ended) await session.sendTextRealtime?.(text);
+    sendText: async (text: string, o: { wait?: boolean; timeoutMs?: number } = {}) => {
+      if (ended) return;
+      const waited = o.wait ? new Promise<void>((r) => { turnWaiters.push(r); setTimeout(r, o.timeoutMs ?? 20_000); }) : undefined;
+      await session.sendTextRealtime?.(text);
+      await waited;
     },
     /**
      * Has the model read one of OUR templates aloud, word for word, and checks what it actually said. Result:

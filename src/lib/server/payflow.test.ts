@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { OpError } from "../op/types";
 import { MemoryStore } from "../store/memory";
-import { cancelPayment, finishPayment, setUserPin, startPayment, type PayDeps } from "./payflow";
+import { cancelPayment, finishPayment, setUserPin, setupStatus, startPayment, type PayDeps } from "./payflow";
 
 beforeAll(() => {
   process.env.APP_SECRET = "test-secret-test-secret-test-secret-1234";
@@ -314,5 +314,24 @@ describe("audit trail of the payment flow (survives a page reset, unlike the scr
     }
     const mine = await d.store.list<{ id: string }>("receipts_by_user", { prefix: "u1|", newestFirst: true });
     expect(mine.map((r) => r.id)).toEqual([...ids].reverse());
+  });
+});
+
+describe("setup status (first-run voice setup)", () => {
+  it("a new person has no PIN and no passkey", async () => {
+    expect(await setupStatus(deps(), "new-user")).toEqual({ ok: true, hasPin: false, hasPasskey: false });
+  });
+  it("after the PIN is set it says so, and never returns the PIN or its hash", async () => {
+    const d = await ready();
+    const r = await setupStatus(d, "u1");
+    expect(r).toEqual({ ok: true, hasPin: true, hasPasskey: false });
+  });
+  it("reports a registered passkey", async () => {
+    const d = deps({ passkeys: async () => [{} as never] });
+    expect((await setupStatus(d, "u1")).hasPasskey).toBe(true);
+  });
+  it("only looks at the asked person", async () => {
+    const d = await ready();
+    expect((await setupStatus(d, "someone-else")).hasPin).toBe(false);
   });
 });

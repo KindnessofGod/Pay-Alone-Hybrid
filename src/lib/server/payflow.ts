@@ -290,3 +290,10 @@ export function setUserPin(d: PayDeps, userId: string, body: { pin?: unknown; ol
     r.ok ? { outcome: "ok" } : r.reason === "weak_pin" ? { outcome: "weak" } : r.reason === "wrong" || r.reason === "locked" ? { outcome: r.reason } : failFields(r.reason),
   );
 }
+
+/** What first-run setup still needs: a PIN, a fingerprint (passkey). Booleans only; nothing secret is returned. */
+export async function setupStatus(d: PayDeps, userId: string): Promise<{ ok: true; hasPin: boolean; hasPasskey: boolean }> {
+  const hasPin = (await pinStoreOf(d.store).get(userId)) != null;
+  const hasPasskey = ((await d.passkeys?.(userId)) ?? []).length > 0;
+  return { ok: true, hasPin, hasPasskey };
+}

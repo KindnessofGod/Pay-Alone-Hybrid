@@ -48,6 +48,26 @@ describe("sendText", () => {
   });
 });
 
+describe("sendText with wait", () => {
+  it("resolves when the model's turn is complete", async () => {
+    const { c, push } = setup();
+    let done = false;
+    const p = c.sendText("[app opened]", { wait: true }).then(() => (done = true));
+    await tick();
+    expect(done).toBe(false);
+    push({ type: "serverContent", outputTranscription: { text: "Hello" } });
+    push({ type: "serverContent", turnComplete: true });
+    await p;
+    expect(done).toBe(true);
+    await c.stop();
+  });
+  it("gives up waiting after the time limit", async () => {
+    const { c } = setup();
+    await c.sendText("[app opened]", { wait: true, timeoutMs: 20 });
+    await c.stop();
+  });
+});
+
 describe("speakExact", () => {
   it("asks the model to read the template, plays its audio even when output was muted, and reports spoken", async () => {
     const { c, sent, push, out } = setup();
