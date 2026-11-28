@@ -6,6 +6,7 @@
 //   - the payee must appear in the transcript, or be a clear near-miss of exactly one contact ("Tundi").
 import type { Contact, Proposal } from "./crosscheck";
 import { parseBareAmount } from "./dialog";
+import { langByCode, stringsFor, type LangCode } from "./languages";
 
 export type LivePayReason = "unknown_payee" | "amount_not_heard" | "over_limit" | "not_ready";
 export type LivePayResult = { ok: true; proposal: Proposal } | { ok: false; reason: LivePayReason; names?: string[] };
@@ -76,11 +77,16 @@ export function decideLivePayment(args: unknown, said: string, contacts: Contact
 
 // ---- what the model is told ----------------------------------------------------------------------
 
-export function liveInstruction(contacts: Contact[], pronunciation: Record<string, string> = {}): string {
+export function liveInstruction(contacts: Contact[], pronunciation: Record<string, string> = {}, lang: LangCode = "en"): string {
+  const L = langByCode(lang);
+  const S = stringsFor(lang);
   const list = contacts.map((c) => (pronunciation[c.name] ? `${c.name} (sounds like ${pronunciation[c.name].toLowerCase()})` : c.name)).join("; ");
   return (
     "You are the friendly voice assistant of Pay Alone, a payment app for blind, elderly and non-reading people. " +
-    "The person speaks English with a Nigerian accent. Speak English only, and ignore any words that are not English in what you think you heard. Keep every answer short and plain, one or two sentences. " +
+    (lang === "en"
+      ? "The person speaks English with a Nigerian accent. Speak English only, and ignore any words that are not English in what you think you heard. "
+      : `The person has chosen ${L.name}. Speak ${L.name} only. Always write the saved names exactly as listed below, in Latin letters. When the person gives an amount, it must be said in numbers; if they did not use numbers, ask them to say the amount in numbers (${S.needNumbers}). `) +
+    "Keep every answer short and plain, one or two sentences. " +
     "All amounts are in naira. " +
     `The saved people are: ${list}. The part in brackets is only how a name sounds: always write the name itself (for example Tunde), never the sound spelling. Only pay these people. ` +
     "You can never approve, confirm or send money. Never say a payment is done or sent; say only that the app will show the details. " +
@@ -88,7 +94,12 @@ export function liveInstruction(contacts: Contact[], pronunciation: Record<strin
     "Call propose_payment whenever the person wants to pay, send or give money to someone, even if you are unsure; call it right away and do not ask for yes or no first, because the person approves on the app. Set request to their own words. " +
     "If the tool answers that the name or amount was not understood, ask the person once, briefly, to say it again (for an unknown name, offer the saved names). " +
     "Never say you will show the details unless you called propose_payment in the same turn. If you are not sure of the name, ask, for example: Did you mean Tunde? "
-    + "After a successful call, say only that you will show them the details. Do not repeat the name or the amount."
+    + "After a successful call, say only that you will show them the details. Do not repeat the name or the amount. " +
+    "The people who use this app cannot see the screen, so you speak first. " +
+    `When the message is exactly "[app opened]", greet them at once with this: "${S.greetFirst}" ` +
+    `When the message is exactly "[app opened again]", greet them with this: "${S.greetBack}" ` +
+    'When a message starts with "Read this exactly, word for word, nothing else:", say only the text after the colon, word for word, in the same language it is written in. Add nothing, change no number or name, and do not call any tool. ' +
+    "Never say that a payment has been made or approved."
   );
 }
 

@@ -6,28 +6,28 @@ function store(initial: Record<string, string> = {}) {
   return { getItem: (k: string) => m[k] ?? null, setItem: (k: string, v: string) => void (m[k] = v), removeItem: (k: string) => void delete m[k], m };
 }
 
-describe("liveEnabled (feature flag, off by default)", () => {
-  it("is off with nothing set", () => expect(liveEnabled("", store())).toBe(false));
-  it("?live=1 turns it on and remembers it", () => {
+describe("liveEnabled (Live is the default; ?live=0 turns it off)", () => {
+  it("is on with nothing set", () => expect(liveEnabled("", store())).toBe(true));
+  it("?live=0 turns it off and remembers it for the tab", () => {
     const s = store();
-    expect(liveEnabled("?live=1", s)).toBe(true);
-    expect(liveEnabled("", s)).toBe(true);
-  });
-  it("?live=0 turns it off and forgets it", () => {
-    const s = store({ payalone_live: "1" });
     expect(liveEnabled("?live=0", s)).toBe(false);
     expect(liveEnabled("", s)).toBe(false);
   });
+  it("?live=1 turns it back on and forgets the off switch", () => {
+    const s = store({ payalone_live: "0" });
+    expect(liveEnabled("?live=1", s)).toBe(true);
+    expect(liveEnabled("", s)).toBe(true);
+  });
   it("any other value does nothing", () => {
-    expect(liveEnabled("?live=yes", store())).toBe(false);
-    expect(liveEnabled("?live=true", store({ payalone_live: "1" }))).toBe(true);
+    expect(liveEnabled("?live=yes", store())).toBe(true);
+    expect(liveEnabled("?live=no", store({ payalone_live: "0" }))).toBe(false);
   });
   it("works with no storage or storage that throws", () => {
-    expect(liveEnabled("?live=1", undefined)).toBe(true);
-    expect(liveEnabled("", undefined)).toBe(false);
+    expect(liveEnabled("?live=0", undefined)).toBe(false);
+    expect(liveEnabled("", undefined)).toBe(true);
     const bad = { getItem: () => { throw new Error("x"); }, setItem: () => { throw new Error("x"); }, removeItem: () => { throw new Error("x"); } };
-    expect(liveEnabled("?live=1", bad)).toBe(true);
-    expect(liveEnabled("", bad)).toBe(false);
+    expect(liveEnabled("?live=0", bad)).toBe(false);
+    expect(liveEnabled("", bad)).toBe(true);
   });
 });
 

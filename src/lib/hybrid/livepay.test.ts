@@ -107,6 +107,30 @@ describe("decideLivePayment", () => {
   });
 });
 
+describe("liveInstruction: greeting, read-exactly rule and language", () => {
+  const en = liveInstruction(CONTACTS, {});
+  it("tells the model to greet first on [app opened], with the exact wording, and shorter for a returning visit", () => {
+    expect(en).toContain("[app opened]");
+    expect(en).toContain("Hello, welcome to Pay Alone. What would you like to do today? You can send money, check your receipts, or ask me anything.");
+    expect(en).toContain("[app opened again]");
+    expect(en).toContain("Welcome back to Pay Alone. What would you like to do?");
+  });
+  it("tells the model to read 'Read this exactly' messages word for word and call no tool", () => {
+    expect(en).toContain("Read this exactly");
+    expect(en).toMatch(/word for word/i);
+    expect(en).toMatch(/do not call any tool/i);
+  });
+  it("English stays English only", () => expect(en).toMatch(/Speak English only/));
+  it("another language names the language and asks for amounts in digits", () => {
+    const fr = liveInstruction(CONTACTS, {}, "fr");
+    expect(fr).toMatch(/Speak French/);
+    expect(fr).not.toMatch(/Speak English only/);
+    expect(fr).toContain("Bonjour, bienvenue sur Pay Alone");
+    expect(fr).toMatch(/amount in numbers/i);
+    expect(fr).toContain("Always write the saved names exactly");
+  });
+});
+
 describe("liveInstruction and tool declaration", () => {
   const pron = { Tunde: "TOON-day", "Mama Ade": "MAH-mah AH-day" };
   const t = liveInstruction(CONTACTS, pron);

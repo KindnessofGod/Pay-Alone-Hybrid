@@ -1,22 +1,25 @@
 // Connects a Gemini Live session through Firebase AI Logic (Gemini Developer API backend).
-// Prototype only, behind ?live=1. See src/lib/hybrid/live.ts for the rules around it.
+// The default conversation engine (?live=0 turns it off). See src/lib/hybrid/live.ts for the rules around it.
 "use client";
 import { getLiveGenerativeModel, ResponseModality, Schema } from "firebase/ai";
 import { firebaseAI } from "./client";
 import { LIVE_MODEL, type LiveSessionLike } from "../hybrid/live";
 import type { Contact } from "../hybrid/crosscheck";
 import { liveInstruction } from "../hybrid/livepay";
+import type { LangCode } from "../hybrid/languages";
 
-export async function connectLive(contacts: Contact[], pronunciation: Record<string, string> = {}): Promise<LiveSessionLike> {
+export async function connectLive(contacts: Contact[], pronunciation: Record<string, string> = {}, lang: LangCode = "en"): Promise<LiveSessionLike> {
   const model = getLiveGenerativeModel(firebaseAI(), {
     model: LIVE_MODEL,
     generationConfig: {
       responseModalities: [ResponseModality.AUDIO],
-      speechConfig: { languageCode: "en-US", voiceConfig: { prebuiltVoiceConfig: { voiceName: "Puck" } } },
+      // The native-audio Live models choose the spoken language themselves (Google: "do not support explicitly setting the language code"),
+      // so only English sets it; every other language is asked for in the system instruction.
+      speechConfig: { ...(lang === "en" ? { languageCode: "en-US" } : {}), voiceConfig: { prebuiltVoiceConfig: { voiceName: "Puck" } } },
       inputAudioTranscription: {},
       outputAudioTranscription: {},
     },
-    systemInstruction: liveInstruction(contacts, pronunciation),
+    systemInstruction: liveInstruction(contacts, pronunciation, lang),
     tools: [
       {
         functionDeclarations: [

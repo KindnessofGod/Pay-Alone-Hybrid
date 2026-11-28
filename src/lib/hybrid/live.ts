@@ -1,4 +1,4 @@
-// Gemini Live prototype (Firebase AI Logic Live API), behind a flag that is OFF by default (?live=1).
+// Gemini Live conversation engine (Firebase AI Logic Live API). ON by default; ?live=0 turns it off.
 // Plain code only: no Firebase import here, so every rule below is unit-tested with a mock session.
 //
 // Money stays locked exactly as in the normal flow:
@@ -13,25 +13,26 @@ import { spokenSecret, type SecretKind } from "./tripwire";
 import type { Understood } from "./understand";
 import type { Contact } from "./crosscheck";
 import { decideLivePayment, promisesDetails } from "./livepay";
+import { exactInstruction, matchesTemplate, stillOnTrack } from "./exact";
 
 export const LIVE_MODEL = "gemini-3.1-flash-live-preview"; // first Gemini Developer API model on firebase.google.com/docs/ai-logic/live-api
 export const LIVE_FLAG_KEY = "payalone_live";
 
-/** ?live=1 turns the prototype on for this tab session (remembered), ?live=0 turns it off. Default: off. */
+/** Live is the default conversation engine. ?live=0 turns it off for this tab session (remembered), ?live=1 turns it back on. */
 export function liveEnabled(search: string, storage?: Pick<Storage, "getItem" | "setItem" | "removeItem">): boolean {
   const q = new URLSearchParams(search).get("live");
   try {
-    if (q === "1") storage?.setItem(LIVE_FLAG_KEY, "1");
-    else if (q === "0") storage?.removeItem(LIVE_FLAG_KEY);
+    if (q === "0") storage?.setItem(LIVE_FLAG_KEY, "0");
+    else if (q === "1") storage?.removeItem(LIVE_FLAG_KEY);
   } catch {
-    /* storage blocked: the flag then only lasts for this page load */
+    /* storage blocked: the switch then only lasts for this page load */
   }
-  if (q === "1") return true;
   if (q === "0") return false;
+  if (q === "1") return true;
   try {
-    return storage?.getItem(LIVE_FLAG_KEY) === "1";
+    return storage?.getItem(LIVE_FLAG_KEY) !== "0";
   } catch {
-    return false;
+    return true;
   }
 }
 
@@ -149,6 +150,7 @@ export interface LiveSessionLike {
   readonly isClosed: boolean;
   receive(): AsyncGenerator<Msg>;
   sendAudioRealtime(blob: { mimeType: string; data: string }): Promise<void>;
+  sendTextRealtime?(text: string): Promise<void>;
   sendFunctionResponses(r: { id?: string; name: string; response: object }[]): Promise<void>;
   close(): Promise<void>;
 }
@@ -168,6 +170,8 @@ export interface LiveDeps {
   onTripwire: (secret: SecretKind) => void;
   /** Base64 16-bit PCM at 24 kHz from the model. Not called while output is muted. */
   onAudioOut: (b64: string) => void;
+  /** The model said something other than our template while reading it: the page speaks the template itself. No content. */
+  onMismatch?: () => void;
   /** The person talked over the model: drop any audio still queued. */
   onInterrupted?: () => void;
   /** Called once. code is a fixed word for the audit event, never text. */
@@ -203,11 +207,20 @@ export function runLive(session: LiveSessionLike, d: LiveDeps, opts: { startMute
   let counted = 0;
   let toolSeen = false; // a tool call came in during the current turn
   const gate = createMicGate<string>((b64) => void session.sendAudioRealtime({ mimeType: "audio/pcm;rate=16000", data: b64 }).catch(() => undefined));
+  // The microphone is closed while ANY of these holds: the person paused (space bar), a payment card is open, or
+  // we are having the model read one of our templates (so it cannot hear itself or a PIN).
+  const holds = { user: false, card: false, exact: false };
+  const syncGate = () => (holds.user || holds.card || holds.exact ? gate.pause() : gate.resume());
+  type Exact = { template: string; buf: string; prevMuted: boolean; done: (r: "spoken" | "mismatch" | "failed") => void };
+  let exact: Exact | null = null;
+  let restoreMuted: boolean | null = null; // set after an aborted read: drop the rest of that turn, then go back to this
+  let exactQueue: Promise<unknown> = Promise.resolve();
 
   const finish = async (how: LiveEnd, code?: string, detail?: { reason: string; closeCode?: number }) => {
     if (ended) return;
     ended = true;
     gate.pause();
+    exact?.done("failed");
     try {
       await session.close();
     } catch {
@@ -235,13 +248,60 @@ export function runLive(session: LiveSessionLike, d: LiveDeps, opts: { startMute
       if (r.kind !== "proposal") return;
       const ok = await d.present(r, said);
       if (ok) {
-        gate.pause();
+        holds.card = true;
+        syncGate();
         muted = true;
       }
       d.onTool?.({ shown: ok, reason: ok ? "fallback" : "not_ready", call: { name: "fallback" }, response: { shown: ok } });
     } catch {
       /* the normal flow stays available */
     }
+  }
+
+  function checkExact(e: Exact, c: ServerContentLike) {
+    if (c.interrupted) return endExact(e, "failed", true);
+    if (c.outputTranscription?.text) {
+      e.buf += c.outputTranscription.text;
+      if (!stillOnTrack(e.template, e.buf).ok) return endExact(e, "mismatch", !c.turnComplete);
+    }
+    if (c.turnComplete) endExact(e, matchesTemplate(e.template, e.buf).ok ? "spoken" : "mismatch", false);
+  }
+
+  function endExact(e: Exact, r: "spoken" | "mismatch" | "failed", cut: boolean) {
+    if (exact !== e) return;
+    exact = null;
+    holds.exact = false;
+    syncGate();
+    if (cut) {
+      // stop whatever is queued and drop the rest of this turn
+      d.onInterrupted?.();
+      muted = true;
+      restoreMuted = e.prevMuted;
+    } else muted = e.prevMuted;
+    if (r === "mismatch") d.onMismatch?.();
+    e.done(r);
+  }
+
+  function runExact(template: string, timeoutMs: number): Promise<"spoken" | "mismatch" | "failed"> {
+    return new Promise((resolve) => {
+      if (ended || !session.sendTextRealtime) return resolve("failed");
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const e: Exact = {
+        template,
+        buf: "",
+        prevMuted: muted,
+        done: (r) => {
+          clearTimeout(timer);
+          resolve(r);
+        },
+      };
+      exact = e;
+      holds.exact = true;
+      syncGate();
+      muted = false;
+      timer = setTimeout(() => endExact(e, "failed", true), timeoutMs);
+      session.sendTextRealtime(exactInstruction(template)).catch(() => endExact(e, "failed", false));
+    });
   }
 
   async function onMessage(m: Msg) {
@@ -252,7 +312,9 @@ export function runLive(session: LiveSessionLike, d: LiveDeps, opts: { startMute
         const t = spokenSecret(currentInput(next));
         if (t.tripped) return trip(t.kind ?? "pin"); // the words are never shown or kept
       }
-      const heard = muted ? { ...c, outputTranscription: undefined } : c; // not heard, so not shown either
+      const reading = exact; // one of our templates is being read by the model right now
+      if (reading) checkExact(reading, c);
+      const heard = muted || reading || restoreMuted !== null ? { ...c, outputTranscription: undefined } : c; // not heard (or our own template), so not shown either
       if (c.interrupted) d.onInterrupted?.();
       turns = applyServerContent(turns, heard);
       d.onTurns(turns);
@@ -260,7 +322,11 @@ export function runLive(session: LiveSessionLike, d: LiveDeps, opts: { startMute
         d.onTurnDone?.(turns[counted].who === "you" ? "person" : "assistant", turns[counted].text.length);
         counted++;
       }
-      if (c.turnComplete) await fallback();
+      if (c.turnComplete && restoreMuted !== null) {
+        muted = restoreMuted;
+        restoreMuted = null;
+      }
+      if (c.turnComplete && !reading) await fallback();
       if (!muted) for (const p of c.modelTurn?.parts ?? []) if (p.inlineData?.data && (p.inlineData.mimeType ?? "").startsWith("audio/")) d.onAudioOut(p.inlineData.data);
     } else if (m.type === "toolCall") {
       toolSeen = true;
@@ -275,7 +341,8 @@ export function runLive(session: LiveSessionLike, d: LiveDeps, opts: { startMute
             present: async (r, said) => {
               const ok = await d.present(r, said);
               if (ok) {
-                gate.pause(); // no audio goes to Live while the card is open
+                holds.card = true; // no audio goes to Live while the card is open
+                syncGate();
                 muted = true; // and its voice stays silent: our own read-back is the only thing spoken
               }
               return ok;
@@ -311,10 +378,33 @@ export function runLive(session: LiveSessionLike, d: LiveDeps, opts: { startMute
     sendMic: (b64: string) => {
       if (!ended) gate.push(b64);
     },
-    pauseMic: gate.pause,
+    pauseMic: () => {
+      holds.card = true;
+      syncGate();
+    },
     resume: () => {
       muted = false;
-      if (!ended) gate.resume();
+      holds.card = false;
+      if (!ended) syncGate();
+    },
+    /** The person's own pause (space bar): the microphone stays closed until they resume. */
+    setUserPaused: (v: boolean) => {
+      holds.user = v;
+      if (!ended) syncGate();
+    },
+    isUserPaused: () => holds.user,
+    /** A plain client text turn (e.g. "[app opened]"). Never contains the person's money details. */
+    sendText: async (text: string) => {
+      if (!ended) await session.sendTextRealtime?.(text);
+    },
+    /**
+     * Has the model read one of OUR templates aloud, word for word, and checks what it actually said. Result:
+     * "spoken", "mismatch" (it said something else: audio is cut, the page speaks the template itself) or "failed".
+     */
+    speakExact: (template: string, o: { timeoutMs?: number } = {}) => {
+      const run = exactQueue.then(() => runExact(template, o.timeoutMs ?? 20_000));
+      exactQueue = run.catch(() => undefined);
+      return run;
     },
     isMicPaused: gate.isPaused,
     setOutputMuted: (v: boolean) => void (muted = v),
