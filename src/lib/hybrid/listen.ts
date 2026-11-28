@@ -27,25 +27,103 @@ function ctor(): RecCtor | undefined {
   return w.SpeechRecognition ?? w.webkitSpeechRecognition;
 }
 
-export async function localSpeechStatus(lang = "en-US"): Promise<"local" | "installable" | "server" | "none"> {
+export type LocalStatus = "local" | "installable" | "downloading" | "server" | "none";
+
+export async function localSpeechStatus(lang = "en-US"): Promise<LocalStatus> {
   const C = ctor();
   if (!C) return "none";
   if (!C.available) return "server";
   try {
     const a = await failAfter(C.available({ langs: [lang], processLocally: true }), 5_000, "Speech check");
-    return a === "available" ? "local" : a === "unavailable" ? "server" : "installable";
+    return a === "available" ? "local" : a === "unavailable" ? "server" : a === "downloading" ? "downloading" : "installable";
   } catch {
     return "server";
   }
 }
 
-export async function installLocalSpeech(lang = "en-US"): Promise<boolean> {
+/**
+ * Starts the on-device speech pack download and keeps watching it in the background: asks Chrome every 3 s for up to
+ * 3 minutes and reports "downloading", then "local" (ready) or "server" (gave up). Call it from a tap: install()
+ * may need a user gesture. cancel() stops the watching.
+ */
+export function installLocalSpeech(
+  lang = "en-US",
+  onStatus: (s: "local" | "downloading" | "server" | "none") => void = () => undefined,
+  opts: { everyMs?: number; maxMs?: number } = {},
+): { done: Promise<"local" | "server" | "none">; cancel: () => void } {
   const C = ctor();
-  try {
-    // The pack may keep downloading in the background; we do not wait more than 5 seconds for it.
-    return Boolean(C?.install && (await orAfter(C.install({ langs: [lang], processLocally: true }), 5_000, false)));
-  } catch {
-    return false;
+  const every = opts.everyMs ?? 3_000;
+  const max = opts.maxMs ?? 180_000;
+  let stop: () => void = () => undefined;
+  const done = new Promise<"local" | "server" | "none">((resolve) => {
+    if (!C || !C.available) {
+      const s = C ? "server" : "none";
+      onStatus(s);
+      return resolve(s);
+    }
+    let over = false;
+    const end = (s: "local" | "server") => {
+      if (over) return;
+      over = true;
+      clearInterval(timer);
+      clearTimeout(limit);
+      onStatus(s);
+      resolve(s);
+    };
+    const check = async () => {
+      if (over) return;
+      try {
+        const a = await C.available!({ langs: [lang], processLocally: true });
+        if (over) return;
+        if (a === "available") end("local");
+        else if (a === "unavailable") end("server");
+      } catch {
+        /* try again on the next tick */
+      }
+    };
+    onStatus("downloading");
+    try {
+      void C.install?.({ langs: [lang], processLocally: true }).then(() => check(), () => undefined);
+    } catch {
+      /* the polling still tells us */
+    }
+    const timer = setInterval(() => void check(), every);
+    const limit = setTimeout(() => end("server"), max);
+    stop = () => {
+      if (over) return;
+      over = true;
+      clearInterval(timer);
+      clearTimeout(limit);
+      resolve("server");
+    };
+  });
+  return { done, cancel: () => stop() };
+}
+
+export type SpeechErrorKind = "permission" | "network" | "language" | "no_mic" | "other";
+export type SpeechErrorInfo = { kind: SpeechErrorKind; code: string; say: string };
+
+/** Chrome's error code to a short message, and a code safe to report (letters and underscores only). */
+export function speechErrorInfo(chromeCode: string): SpeechErrorInfo {
+  switch (chromeCode) {
+    case "not-allowed":
+    case "service-not-allowed":
+      return { kind: "permission", code: chromeCode.replace(/-/g, "_"), say: "I can't use your microphone. Click the lock icon left of the web address, set Microphone to Allow, then reload." };
+    case "network":
+      return { kind: "network", code: "network", say: "Online speech isn't reachable right now. Please type instead." };
+    case "language-not-supported":
+      return { kind: "language", code: "language_not_supported", say: "On-device speech isn't ready for this language." };
+    case "audio-capture":
+      return { kind: "no_mic", code: "audio_capture", say: "No microphone found." };
+    default:
+      return { kind: "other", code: "other", say: "The microphone did not work. You can type instead." };
+  }
+}
+
+export class SpeechError extends Error {
+  constructor(public info: SpeechErrorInfo) {
+    super(info.code);
+    this.name = "SpeechError";
   }
 }
 
@@ -59,7 +137,7 @@ export function stopListening(): void {
 }
 
 /** Listens for one sentence. Ends on silence, on stopListening(), or after maxMs at the latest. */
-export function listenOnce(opts: { lang?: string; local: boolean; maxMs?: number }): Promise<string> {
+export function listenOnce(opts: { lang?: string; local: boolean; maxMs?: number; onInterim?: (words: string) => void }): Promise<string> {
   return new Promise((resolve, reject) => {
     const C = ctor();
     if (!C) return reject(new Error("no speech recognition"));
@@ -67,7 +145,8 @@ export function listenOnce(opts: { lang?: string; local: boolean; maxMs?: number
     const r = new C();
     current = r;
     r.lang = opts.lang ?? "en-US";
-    r.interimResults = false;
+    // Interim words are only shown on screen (onInterim). They are never returned, stored or sent anywhere.
+    r.interimResults = Boolean(opts.onInterim);
     r.maxAlternatives = 1;
     if (opts.local) r.processLocally = true;
     let heard = "";
@@ -95,8 +174,19 @@ export function listenOnce(opts: { lang?: string; local: boolean; maxMs?: number
       finish();
     }, (opts.maxMs ?? 10_000) + 1_000);
     finishCurrent = () => finish();
-    r.onresult = (e) => (heard = e.results[0]?.[0]?.transcript ?? "");
-    r.onerror = (e) => (e.error === "no-speech" || e.error === "aborted" ? finish() : finish(new Error(e.error)));
+    r.onresult = (e) => {
+      let fin = "";
+      let live = "";
+      for (let i = 0; i < e.results.length; i++) {
+        const part = e.results[i];
+        const t = part[0]?.transcript ?? "";
+        if ((part as { isFinal?: boolean }).isFinal === false) live += t;
+        else fin += t;
+      }
+      heard = fin;
+      if (live && !settled) opts.onInterim?.((fin + live).trim());
+    };
+    r.onerror = (e) => (e.error === "no-speech" || e.error === "aborted" ? finish() : finish(new SpeechError(speechErrorInfo(e.error))));
     r.onend = () => finish();
     r.start();
   });

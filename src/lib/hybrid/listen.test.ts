@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { listenOnce, say, stopListening } from "./listen";
+import { installLocalSpeech, listenOnce, localSpeechStatus, say, SpeechError, speechErrorInfo, stopListening } from "./listen";
 
 class FakeRec {
   static last: FakeRec | undefined;
@@ -118,5 +118,147 @@ describe("say keeps its contract on the browser voice (model not loaded)", () =>
     const { spoken } = fakeSynth(true);
     await say("Your pin is 4826.");
     expect(spoken).toEqual([]);
+  });
+});
+
+describe("speechErrorInfo maps Chrome error codes to short, specific messages", () => {
+  it("microphone blocked", () => {
+    for (const c of ["not-allowed", "service-not-allowed"]) {
+      const i = speechErrorInfo(c);
+      expect(i.kind).toBe("permission");
+      expect(i.say).toBe("I can't use your microphone. Click the lock icon left of the web address, set Microphone to Allow, then reload.");
+    }
+  });
+  it("network", () => {
+    expect(speechErrorInfo("network")).toMatchObject({ kind: "network", say: "Online speech isn't reachable right now. Please type instead." });
+  });
+  it("language not supported asks for the opt-in flow", () => {
+    expect(speechErrorInfo("language-not-supported").kind).toBe("language");
+  });
+  it("no microphone", () => {
+    expect(speechErrorInfo("audio-capture")).toMatchObject({ kind: "no_mic", say: "No microphone found." });
+  });
+  it("anything else is generic, and the audit code is lowercase letters and underscores only", () => {
+    expect(speechErrorInfo("weird thing 42")).toMatchObject({ kind: "other", code: "other" });
+    for (const c of ["not-allowed", "service-not-allowed", "network", "language-not-supported", "audio-capture"]) expect(speechErrorInfo(c).code).toMatch(/^[a-z_]+$/);
+  });
+});
+
+describe("listenOnce errors are typed", () => {
+  it("rejects with a SpeechError carrying the info", async () => {
+    (globalThis as Record<string, unknown>).SpeechRecognition = FakeRec;
+    const p = listenOnce({ local: false });
+    FakeRec.last!.onerror!({ error: "not-allowed" });
+    const e = await p.catch((x) => x);
+    expect(e).toBeInstanceOf(SpeechError);
+    expect(e.info.kind).toBe("permission");
+  });
+  it("no-speech and aborted are not errors", async () => {
+    (globalThis as Record<string, unknown>).SpeechRecognition = FakeRec;
+    const p = listenOnce({ local: false });
+    FakeRec.last!.onerror!({ error: "no-speech" });
+    expect(await p).toBe("");
+  });
+});
+
+describe("live words while listening (interim) never become the answer", () => {
+  it("asks for interim results only when someone is watching, and shows them", async () => {
+    (globalThis as Record<string, unknown>).SpeechRecognition = FakeRec;
+    const seen: string[] = [];
+    const p = listenOnce({ local: true, onInterim: (t) => seen.push(t) });
+    expect(FakeRec.last!.interimResults).toBe(true);
+    FakeRec.last!.onresult!({ results: [Object.assign([{ transcript: "send five" }], { isFinal: false })] });
+    FakeRec.last!.onresult!({ results: [Object.assign([{ transcript: "send five hundred" }], { isFinal: false })] });
+    expect(seen).toEqual(["send five", "send five hundred"]);
+    FakeRec.last!.onresult!({ results: [Object.assign([{ transcript: "send 500 naira to Tunde" }], { isFinal: true })] });
+    FakeRec.last!.onend!();
+    expect(await p).toBe("send 500 naira to Tunde");
+  });
+  it("without a watcher interim stays off", async () => {
+    (globalThis as Record<string, unknown>).SpeechRecognition = FakeRec;
+    const p = listenOnce({ local: true });
+    expect(FakeRec.last!.interimResults).toBe(false);
+    stopListening();
+    await p;
+  });
+  it("words that never became final are not returned", async () => {
+    (globalThis as Record<string, unknown>).SpeechRecognition = FakeRec;
+    const p = listenOnce({ local: true, onInterim: () => undefined });
+    FakeRec.last!.onresult!({ results: [Object.assign([{ transcript: "half a sentence" }], { isFinal: false })] });
+    FakeRec.last!.onend!();
+    expect(await p).toBe("");
+  });
+});
+
+describe("installLocalSpeech keeps going in the background", () => {
+  type Opts = { langs: string[]; processLocally: boolean };
+  function pack(states: string[]) {
+    const calls = { install: 0, available: 0 };
+    let i = 0;
+    class R extends FakeRec {
+      static available = async (_o: Opts) => { calls.available++; return states[Math.min(i++, states.length - 1)]; };
+      static install = async (_o: Opts) => { calls.install++; return false; };
+    }
+    (globalThis as Record<string, unknown>).SpeechRecognition = R;
+    return calls;
+  }
+  it("calls install once, polls every 3 s, and reports local when the pack arrives", async () => {
+    vi.useFakeTimers();
+    const calls = pack(["downloading", "downloading", "available"]);
+    const seen: string[] = [];
+    const h = installLocalSpeech("en-US", (s) => seen.push(s));
+    await vi.advanceTimersByTimeAsync(3_000);
+    await vi.advanceTimersByTimeAsync(3_000);
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(await h.done).toBe("local");
+    expect(calls.install).toBe(1);
+    expect(seen[0]).toBe("downloading");
+    expect(seen.at(-1)).toBe("local");
+    const n = calls.available;
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(calls.available).toBe(n); // stopped polling
+  });
+  it("gives up after 3 minutes with server", async () => {
+    vi.useFakeTimers();
+    pack(["downloading"]);
+    const seen: string[] = [];
+    const h = installLocalSpeech("en-US", (s) => seen.push(s));
+    await vi.advanceTimersByTimeAsync(181_000);
+    expect(await h.done).toBe("server");
+    expect(seen.at(-1)).toBe("server");
+  });
+  it("reports server at once when the pack is unavailable", async () => {
+    vi.useFakeTimers();
+    pack(["unavailable"]);
+    const h = installLocalSpeech("en-US", () => undefined);
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(await h.done).toBe("server");
+  });
+  it("cancel() stops polling", async () => {
+    vi.useFakeTimers();
+    const calls = pack(["downloading"]);
+    const h = installLocalSpeech("en-US", () => undefined);
+    await vi.advanceTimersByTimeAsync(3_000);
+    h.cancel();
+    const n = calls.available;
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(calls.available).toBe(n);
+  });
+  it("reports none when there is no speech recognition", async () => {
+    const h = installLocalSpeech("en-US", () => undefined);
+    expect(await h.done).toBe("none");
+  });
+});
+
+describe("localSpeechStatus", () => {
+  it("tells downloadable, downloading, available and unavailable apart", async () => {
+    for (const [a, want] of [["available", "local"], ["downloadable", "installable"], ["downloading", "downloading"], ["unavailable", "server"]] as const) {
+      class R extends FakeRec { static available = async () => a; }
+      (globalThis as Record<string, unknown>).SpeechRecognition = R;
+      expect(await localSpeechStatus()).toBe(want);
+    }
+  });
+  it("is none without speech recognition", async () => {
+    expect(await localSpeechStatus()).toBe("none");
   });
 });

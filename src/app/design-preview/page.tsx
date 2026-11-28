@@ -2,7 +2,7 @@
 // Screenshot-only page with FIXED SAMPLE DATA. It never calls the wallet, Firebase or an AI.
 // It does not exist in production builds.
 import { notFound } from "next/navigation";
-import { Bubble, Chip, Dock, FingerprintIcon, Header, PayCard, PinStopped, PrivacyCard, ReceiptCard, ReceiptRow, WalletCard } from "../ui";
+import { Bubble, Chip, Dock, FingerprintIcon, Header, ListeningBubble, PayCard, PinStopped, PrivacyCard, ReceiptCard, ReceiptRow, SpeechConsent, WalletCard } from "../ui";
 
 function Frame({ title, nano, children, hint, listening = false }: { title: string; nano: string; children: React.ReactNode; hint: string; listening?: boolean }) {
   return (
@@ -53,7 +53,7 @@ function EmptyReceipts() {
 }
 
 /** A whole wide-layout screen. Real page uses the same classes at >= 1024px. */
-function Desk({ title, nano, empty, turns, side, hint, connected = true }: { title: string; nano: string; empty?: boolean; turns?: React.ReactNode; side: React.ReactNode; hint: string; connected?: boolean }) {
+function Desk({ title, nano, empty, turns, side, hint, connected = true, listening = false }: { listening?: boolean; title: string; nano: string; empty?: boolean; turns?: React.ReactNode; side: React.ReactNode; hint: string; connected?: boolean }) {
   return (
     <section aria-label={title} className="desk-frame">
       <div className="app desk">
@@ -75,7 +75,7 @@ function Desk({ title, nano, empty, turns, side, hint, connected = true }: { tit
                 <div className="chat">{turns}</div>
               )}
             </div>
-            <Dock desk hint={hint} listening={false} micLabel="Press to speak" typed="" tab="talk" />
+            <Dock desk hint={hint} listening={listening} micLabel="Press to speak" typed="" tab="talk" />
           </section>
           <aside className="side" aria-label="Payment, receipts and privacy">{side}</aside>
         </div>
@@ -134,6 +134,40 @@ export default function DesignPreview() {
           <PrivacyCard facts={FACTS} />
         </>}
       />
+
+      <p className="preview-h" id="speech-desk-1">S1. Wide: online speech choice</p>
+      <Desk title="Wide speech choice" nano="available" hint="Tap and speak" side={<><EmptyReceipts /><PrivacyCard facts={FACTS} /></>}
+        turns={<ol className="chat" aria-label="Conversation">
+          <Bubble who="app" chip={<Chip source="rules" />}>Pay Alone is ready. Press the big button or the space bar, then say who to pay and how much.</Bubble>
+          <SpeechConsent onYes={() => undefined} onNo={() => undefined} />
+        </ol>} />
+
+      <p className="preview-h" id="speech-desk-2">S2. Wide: listening, live words</p>
+      <Desk title="Wide listening" nano="available" hint="Listening…" listening side={<><EmptyReceipts /><PrivacyCard facts={FACTS} /></>}
+        turns={<ol className="chat" aria-label="Conversation">
+          <Bubble who="app" chip={<Chip source="rules" />}>Pay Alone is ready. Press the big button or the space bar, then say who to pay and how much.</Bubble>
+          <ListeningBubble words="Send five hundred naira to Tu" />
+        </ol>} />
+
+      <p className="preview-h" id="speech-1">S3. Phone: online speech choice</p>
+      <Frame title="Speech choice" nano="available" hint="Tap and speak">
+        <div className="panel-body">
+          <ol className="chat" aria-label="Conversation">
+            <Bubble who="app" chip={<Chip source="rules" />}>Pay Alone is ready. Press the big button or the space bar, then say who to pay and how much.</Bubble>
+            <SpeechConsent onYes={() => undefined} onNo={() => undefined} />
+          </ol>
+        </div>
+      </Frame>
+
+      <p className="preview-h" id="speech-2">S4. Phone: listening, live words</p>
+      <Frame title="Listening" nano="available" hint="Listening…" listening>
+        <div className="panel-body">
+          <ol className="chat" aria-label="Conversation">
+            <Bubble who="app" chip={<Chip source="rules" />}>Pay Alone is ready. Press the big button or the space bar, then say who to pay and how much.</Bubble>
+            <ListeningBubble words="Send five hundred naira to Tu" />
+          </ol>
+        </div>
+      </Frame>
 
       <p className="preview-h">1. Start screen</p>
       <Frame title="Start screen" nano="checking" hint="Tap to start talking">

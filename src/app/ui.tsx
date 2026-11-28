@@ -109,6 +109,32 @@ export function Bubble({ who, children, chip }: { who: "you" | "app"; children: 
   );
 }
 
+/** Live words while the mic is open. Shown on screen only; the final sentence is what the app understands. */
+export function ListeningBubble({ words }: { words: string }) {
+  return (
+    <li className="b me live" aria-live="off">
+      <span className="vh">You, listening: </span>
+      <span className="dots" aria-hidden="true">Listening…</span> {words && <span>{words}</span>}
+    </li>
+  );
+}
+
+export const SPEECH_CONSENT_TEXT = "To hear you now, I can use Google's online speech. Your voice is sent to Google. You will never say your PIN out loud; you type it. Use online speech?";
+
+/** The one-tap choice for online speech. Nothing is sent to Google until "Use online speech" is pressed. */
+export function SpeechConsent({ onYes, onNo }: { onYes: () => void; onNo: () => void }) {
+  return (
+    <li className="b ai consent" role="group" aria-label="Online speech choice">
+      <span className="vh">Pay Alone: </span>
+      <p>To hear you now, I can use Google&apos;s online speech. <b>Your voice is sent to Google.</b> You will never say your PIN out loud; you type it. Use online speech?</p>
+      <div className="stack">
+        <button type="button" className="btn primary" onClick={onYes}>Use online speech</button>
+        <button type="button" className="btn ghost" onClick={onNo}>I&apos;ll type instead</button>
+      </div>
+    </li>
+  );
+}
+
 export function PinStopped() {
   return (
     <li className="b bad-bubble" role="alert">

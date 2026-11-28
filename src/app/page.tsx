@@ -5,7 +5,8 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "
 import { understand, type Policy, type Understood } from "@/lib/hybrid/understand";
 import type { Contact } from "@/lib/hybrid/crosscheck";
 import { nanoAvailability } from "@/lib/hybrid/device";
-import { installLocalSpeech, listenOnce, localSpeechStatus, say, stopListening } from "@/lib/hybrid/listen";
+import { installLocalSpeech, listenOnce, localSpeechStatus, say, SpeechError, speechErrorInfo, stopListening } from "@/lib/hybrid/listen";
+import { readCloudOptIn, writeCloudOptIn } from "@/lib/hybrid/speechoptin";
 import { api, firebaseApp, firebaseConfigured, remoteSettings, reportEvent } from "@/lib/firebase/client";
 import { speechMode, type SpeechStatus } from "@/lib/hybrid/speechpolicy";
 import { chatEngines, firebaseEngines, lastCall, prepareOnDevice, warmUpOnDevice } from "@/lib/firebase/engines";
@@ -16,7 +17,7 @@ import { chatReply, type ChatTurn } from "@/lib/hybrid/chat";
 import { afterPayment, chatOnly, initialDialog, next as dialogNext, silence, type DialogState } from "@/lib/hybrid/dialog";
 import { spokenSecret } from "@/lib/hybrid/tripwire";
 import Approve from "./Approve";
-import { Bubble, Chip, Dock, Header, PinStopped, PrivacyCard, WalletCard, type Tab } from "./ui";
+import { Bubble, Chip, Dock, Header, ListeningBubble, PinStopped, PrivacyCard, SPEECH_CONSENT_TEXT, SpeechConsent, WalletCard, type Tab } from "./ui";
 import History from "./History";
 import { takeResume, type Resume } from "@/lib/ui/resume";
 
@@ -48,6 +49,8 @@ export default function Home() {
   const [policy, setPolicy] = useState<Policy>("on_device_first");
   const [limitMinor, setLimitMinor] = useState("5000000");
   const [listening, setListening] = useState(false);
+  const [liveWords, setLiveWords] = useState(""); // interim words, shown on screen only
+  const [consent, setConsent] = useState(false); // the one-tap online speech choice
   const [tab, setTab] = useState<Tab>("talk");
   const [walletConnected, setWalletConnected] = useState(false);
   type Turn = { who: "you" | "app"; text: string; ai?: "on_device" | "cloud"; sent?: string };
@@ -63,7 +66,7 @@ export default function Home() {
   const dialog = useRef<DialogState>(initialDialog());
   const lastInput = useRef<"voice" | "typed">("typed"); // hands-free loop only when the person is using the mic
   const inputBox = useRef<HTMLInputElement>(null);
-  const talkRef = useRef<(auto?: boolean) => Promise<void>>(async () => undefined);
+  const talkRef = useRef<(auto?: boolean, forceCloud?: boolean) => Promise<void>>(async () => undefined);
   const history = useRef<ChatTurn[]>([]); // what the open conversation may see (chat.ts drops secrets and keeps the last few)
   const addTurn = useCallback((who: "you" | "app", text: string, ai?: { source: "on_device" | "cloud"; sent?: string }) => {
     if (!text) return;
@@ -80,6 +83,47 @@ export default function Home() {
     });
   }, []);
   const seq = useRef(0); // only the newest request may change the screen
+  const speechRef = useRef<SpeechStatus | "checking">("checking");
+  speechRef.current = speech;
+  const installing = useRef(false);
+
+  const setCloudOptIn = useCallback((on: boolean) => {
+    setCloudSpeech(on);
+    let ls: Storage | undefined;
+    try {
+      ls = window.localStorage;
+    } catch {
+      ls = undefined;
+    }
+    writeCloudOptIn(ls, on);
+  }, []);
+
+  // Speech check on page load (it only asks Chrome; nothing is installed or started without a tap).
+  useEffect(() => {
+    let ls: Storage | undefined;
+    try {
+      ls = window.localStorage;
+    } catch {
+      ls = undefined;
+    }
+    if (readCloudOptIn(ls)) setCloudSpeech(true);
+    void localSpeechStatus().then((sp) => setSpeech((cur) => (cur === "checking" ? sp : cur)));
+  }, []);
+
+  /** Starts the on-device speech pack download once, from a tap, and switches to it live when it is ready. */
+  const kickInstall = useCallback(() => {
+    if (installing.current || (speechRef.current !== "installable" && speechRef.current !== "downloading")) return;
+    installing.current = true;
+    void installLocalSpeech("en-US", (st) => {
+      if (st === "downloading") setSpeech((cur) => (cur === "local" ? cur : "downloading"));
+      else if (st === "local") {
+        setSpeech("local");
+        const t = "Good news: speech now works on this computer. Your voice stays here.";
+        addTurn("app", t);
+        void say(t);
+      } else if (st === "server") setSpeech((cur) => (cur === "local" ? cur : "server"));
+    });
+  }, [addTurn]);
 
   const speak = useCallback(async (t: string) => {
     await say(t);
@@ -91,11 +135,7 @@ export default function Home() {
     setWorking("Getting ready…");
     let policyNow = policy;
     let limitNow = limitMinor;
-    // These checks do not depend on each other, so they run side by side; each has its own time limit.
-    const speechCheck = (async () => {
-      const sp = await localSpeechStatus();
-      return sp === "installable" ? ((await installLocalSpeech()) ? "local" : "server") : sp;
-    })();
+    kickInstall(); // the first tap is a user gesture; the speech pack keeps downloading in the background
     if (firebaseConfigured()) {
       setNano("preparing");
       const [s] = await Promise.all([remoteSettings(), prepareOnDevice((p) => setNano(`downloading ${Math.round(p * 100)}%`))]);
@@ -117,8 +157,6 @@ export default function Home() {
     } else {
       speaker.load(); // natural on-device voice; the browser voice speaks until it is ready
     }
-    const sp = await speechCheck;
-    setSpeech(sp);
     setReady(true);
     setWorking("");
     if (greet) {
@@ -227,22 +265,40 @@ export default function Home() {
     [limitMinor, policy, nano, speak, addTurn],
   );
 
+  const askConsent = useCallback(async () => {
+    setConsent(true);
+    await speak(SPEECH_CONSENT_TEXT);
+  }, [speak]);
+
   const talk = useCallback(
-    async (auto = false) => {
+    async (auto = false, forceCloud = false) => {
       if (busy.current) return stopListening(); // a second press stops listening
-      const mode = speechMode(speech === "checking" ? "none" : speech, cloudSpeech);
+      if (speech === "checking") {
+        await speak("One moment, I am checking speech on this computer.");
+        return;
+      }
+      if (speech !== "local") kickInstall();
+      const mode = speechMode(speech, cloudSpeech || forceCloud);
       if (!mode.mic) {
-        await speak("Speaking is off on this computer, to keep your voice private. Please type instead.");
+        if (auto) return;
+        if (speech === "none") {
+          await speak("This browser cannot hear speech. Please type instead.");
+          return;
+        }
+        await askConsent();
         return;
       }
       lastInput.current = "voice";
       busy.current = true;
+      setConsent(false);
+      setLiveWords("");
       setListening(true);
       let again = false;
       try {
         const before = seq.current;
-        const said = await listenOnce({ local: mode.local });
+        const said = await listenOnce({ local: mode.local, onInterim: setLiveWords });
         setListening(false);
+        setLiveWords("");
         if (seq.current !== before) return; // the person typed while the mic was open: their typing wins
         if (said) {
           again = await handle(said, undefined, "voice");
@@ -253,16 +309,26 @@ export default function Home() {
           await speak(o.say);
           again = o.then === "listen" && seq.current === before;
         }
-      } catch {
-        reportEvent({ event: "error", code: "mic_failed" });
+      } catch (e) {
         setListening(false);
-        await speak("The microphone did not work. You can type instead.");
+        setLiveWords("");
+        const info = e instanceof SpeechError ? e.info : speechErrorInfo("other");
+        reportEvent({ event: "speech_error", code: info.code }); // only the code, never words
+        if (info.kind === "language" && mode.local) {
+          setSpeech("server"); // on-device speech cannot do this language: offer the online choice
+          if (!(cloudSpeech || forceCloud)) await askConsent();
+          else await speak("Speech is not working right now. Please type instead.");
+        } else {
+          const say2 = info.kind === "language" ? "Speech is not working right now. Please type instead." : info.say;
+          addTurn("app", say2);
+          await speak(say2);
+        }
       } finally {
         busy.current = false;
       }
       if (again && (auto || lastInput.current === "voice")) void talkRef.current(true);
     },
-    [handle, speak, speech, cloudSpeech, addTurn],
+    [handle, speak, speech, cloudSpeech, addTurn, askConsent, kickInstall],
   );
   talkRef.current = talk;
 
@@ -318,7 +384,18 @@ export default function Home() {
   }
   const EXAMPLES = ["Send 500 naira to Tunde", "What can you do?", "How do you keep my PIN safe?"];
 
-  const speechWords = speech === "local" ? "on this computer" : speech === "server" ? "Google servers" : speech;
+  const speechWords =
+    speech === "local"
+      ? "on this computer"
+      : speech === "checking"
+        ? "checking"
+        : cloudSpeech && speech !== "none"
+          ? "Google servers (you allowed it)"
+          : speech === "downloading"
+            ? "downloading on-device speech"
+            : speech === "none"
+              ? "not available in this browser"
+              : "off, type instead";
   const voiceWords = voice === "ready" ? "natural (on this computer)" : voice === "loading" ? "loading, browser voice meanwhile" : "browser";
   const hint = !ready ? "Tap to start talking" : listening ? "Listening…" : approving ? "Approve on the card, or say \"no\" to cancel" : "Tap and speak";
   const micLabel = !ready ? "Tap to start talking" : listening ? "Listening. Press to stop" : "Press to speak (or Space)";
@@ -344,6 +421,7 @@ export default function Home() {
       </>
     ) : undefined;
   const hasResultDetails = Boolean(result && result.kind !== "secret_spoken" && (("sentToCloud" in result && result.sentToCloud !== undefined) || result.skipped?.length || (ms > 0 && result.source !== "rules")));
+  const quiet = turns.length === 0 && !approving && !consent && !listening;
   const lastIsApp = turns.length > 0 && turns[turns.length - 1].who === "app";
 
   const approveEl = approving ? (
@@ -372,7 +450,7 @@ export default function Home() {
             />
   ) : null;
   const welcomeEl =
-    turns.length === 0 && !approving ? (
+    quiet ? (
           <section className="welcome" aria-label="Welcome">
             <p className="serif big">Say who you want to pay.</p>
             <p className="note">Or ask me anything.</p>
@@ -391,7 +469,7 @@ export default function Home() {
     ready && speech !== "local" ? (
           <p className="note">
             <label>
-              <input type="checkbox" checked={cloudSpeech} onChange={(e) => setCloudSpeech(e.target.checked)} />
+              <input type="checkbox" checked={cloudSpeech} onChange={(e) => setCloudOptIn(e.target.checked)} />
               <span>Use online speech recognition. Your voice will be sent to Google. Never say a PIN.</span>
             </label>
           </p>
@@ -448,6 +526,28 @@ export default function Home() {
               )}
             </ol>
           )}
+          {(consent || listening) && (
+            <ol className="chat" aria-label="Listening">
+              {consent && !listening && (
+                <SpeechConsent
+                  onYes={() => {
+                    setCloudOptIn(true);
+                    setConsent(false);
+                    kickInstall();
+                    void talkRef.current(false, true);
+                  }}
+                  onNo={() => {
+                    setConsent(false);
+                    const t = "OK. Please type instead.";
+                    addTurn("app", t);
+                    void speak(t);
+                    inputBox.current?.focus();
+                  }}
+                />
+              )}
+              {listening && <ListeningBubble words={liveWords} />}
+            </ol>
+          )}
           {!wide && approveEl}
     </div>
   );
@@ -462,14 +562,14 @@ export default function Home() {
   // Keep the newest message in view inside the conversation panel (wide layout only).
   useEffect(() => {
     if (wide && scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-  }, [wide, turns, working, approving]);
+  }, [wide, turns, working, approving, consent, liveWords]);
 
   if (wide) {
     return (
       <div className="app desk">
         <Header nano={nano} right={walletEl(true)} />
         <div className="grid">
-          <section className={`convo${turns.length === 0 && !approving ? " empty" : ""}`} aria-label="Conversation">
+          <section className={`convo${quiet ? " empty" : ""}`} aria-label="Conversation">
             <div className="scroll" ref={scrollRef}>
               {welcomeEl}
               {chatEl}

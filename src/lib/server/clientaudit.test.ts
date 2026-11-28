@@ -13,6 +13,7 @@ describe("client-reported events: a small fixed list, checked on the server", ()
     expect(validateClientEvent({ event: "intent", source: "rules", ms: 12 })).toEqual({ event: "intent", fields: { outcome: "ok", source: "rules", ms: 12 } });
     expect(validateClientEvent({ event: "chat_reply", source: "cloud", guarded: true })).toEqual({ event: "chat_reply", fields: { outcome: "ok", source: "cloud", guarded: true } });
     expect(validateClientEvent({ event: "voice_ready", voice: "natural" })).toEqual({ event: "voice_ready", fields: { outcome: "ok", voice: "natural" } });
+    expect(validateClientEvent({ event: "speech_error", code: "not_allowed" })).toEqual({ event: "speech_error", fields: { outcome: "fail", code: "not_allowed" } });
     expect(validateClientEvent({ event: "error", code: CLIENT_ERROR_CODES[0] })).toEqual({ event: "error", fields: { outcome: "fail", code: CLIENT_ERROR_CODES[0] } });
   });
 
@@ -29,12 +30,19 @@ describe("client-reported events: a small fixed list, checked on the server", ()
       { event: "voice_ready", voice: "robot" },
       { event: "error", code: "anything I like" },
       { event: 5 },
+      { event: "speech_error" },
+      { event: "speech_error", code: "send 5000 naira to Tunde" }, // a sentence is never a code
+      { event: "speech_error", code: "not-allowed" },
     ]) expect(validateClientEvent(bad)).toBeNull();
   });
 
   it("drops extra fields: a sentence, a name, an amount or a PIN is never kept", () => {
     const v = validateClientEvent({ event: "intent", source: "on_device", ms: 40, said: "send 5000 to Mama Ade", payee: "Mama Ade", amountMinor: "500000", pin: "4826" });
     expect(v).toEqual({ event: "intent", fields: { outcome: "ok", source: "on_device", ms: 40 } });
+  });
+
+  it("speech_error keeps only the code, never a transcript", () => {
+    expect(validateClientEvent({ event: "speech_error", code: "network", transcript: "my pin is 4826", said: "hi" })).toEqual({ event: "speech_error", fields: { outcome: "fail", code: "network" } });
   });
 
   it("recordClientEvent stores the event for the person and answers 400 for anything else", async () => {
