@@ -37,7 +37,7 @@ const STEP_EVENTS: Record<string, { fields?: Record<string, Check>; optional?: R
   example_chip: { fields: { index: int(20) } },
   understand_done: { fields: { source: oneOf("rules", "on_device", "cloud", "none"), kind: oneOf("proposal", "intent", "unclear", "rejected", "secret_spoken"), ms: int(3_600_000), cloud_raced: bool } },
   chat_done: { fields: { source: oneOf("rules", "on_device", "cloud", "none"), ms: int(3_600_000), guarded: bool } },
-  speak: { fields: { engine: oneOf("kokoro", "browser", "none"), ms: int(3_600_000), ok: bool } },
+  speak: { fields: { engine: oneOf("kokoro", "browser", "live", "none"), ms: int(3_600_000), ok: bool } },
   approve_open: { fields: { method_offered: oneOf("passkey", "pin") } },
   approve_action: { outcome: oneOf("ok", "fail", "cancel"), fields: { action: oneOf("fingerprint", "pin", "cancel", "wallet_connect", "continue"), ms: int(3_600_000) } },
   payment_result: { outcome: oneOf("paid", "failed", "stopped"), fields: { ms: int(3_600_000) }, optional: { simulated: bool } },

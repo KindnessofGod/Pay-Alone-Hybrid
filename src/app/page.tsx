@@ -17,7 +17,10 @@ import { chatReply, type ChatTurn } from "@/lib/hybrid/chat";
 import { afterPayment, chatOnly, initialDialog, next as dialogNext, silence, type DialogState } from "@/lib/hybrid/dialog";
 import { spokenSecret } from "@/lib/hybrid/tripwire";
 import Approve from "./Approve";
-import { Bubble, Chip, Dock, Header, ListeningBubble, PinStopped, PrivacyCard, RequestCard, SPEECH_CONSENT_TEXT, SpeechConsent, WalletCard, type Tab } from "./ui";
+import { Bubble, Chip, Dock, Header, LanguagePicker, ListeningBubble, PinStopped, PrivacyCard, RequestCard, SPEECH_CONSENT_TEXT, SpeechConsent, StartLayer, WalletCard, type Tab } from "./ui";
+import Setup from "./Setup";
+import { amountSpoken, readLang, stringsFor, writeLang, type LangCode } from "@/lib/hybrid/languages";
+import { openingTurn, speakableForLive, startKey, APP_OPENED_AGAIN } from "@/lib/ui/voiceflow";
 import History from "./History";
 import { takeResume, type Resume } from "@/lib/ui/resume";
 import { liveEnabled } from "@/lib/hybrid/live";
@@ -73,6 +76,11 @@ export default function Home() {
   const [working, setWorking] = useState("");
   const [voice, setVoice] = useState<TtsStatus>("off");
   const [historyKey, setHistoryKey] = useState(0); // bumps after a payment so the receipts reload
+  const [begun, setBegun] = useState(false); // the start layer is gone: someone pressed a key or tapped
+  const [lang, setLangState] = useState<LangCode>("en");
+  const langRef = useRef<LangCode>("en");
+  langRef.current = lang;
+  const [setupOn, setSetupOn] = useState(false); // first-run setup (PIN, fingerprint) is showing
   const busy = useRef(false);
   const dialog = useRef<DialogState>(initialDialog());
   const lastInput = useRef<"voice" | "typed">("typed"); // hands-free loop only when the person is using the mic
@@ -141,8 +149,20 @@ export default function Home() {
     });
   }, [addTurn]);
 
+  // One natural voice: while Live is running, OUR sentences are read by Live's voice (live.speakExact checks word for
+  // word that it said exactly our template). If it said anything else, or there is no Live session, our own voice speaks.
+  const liveRef = useRef<{ active: boolean; speakExact: (t: string) => Promise<"spoken" | "mismatch" | "failed"> } | null>(null);
   const speak = useCallback(async (t: string) => {
     const t0 = performance.now();
+    const L = liveRef.current;
+    if (L?.active && speakableForLive(t)) {
+      const r = await L.speakExact(t).catch(() => "failed" as const);
+      if (r === "spoken") {
+        reportEvent({ event: "speak", engine: "live", ms: Math.round(performance.now() - t0), ok: true });
+        return;
+      }
+      // "mismatch" was already counted (template_mismatch). Either way: our own voice says the template now.
+    }
     const engine = !t ? "none" : speaker.status() === "ready" ? "kokoro" : "browser";
     try {
       await say(t);
@@ -153,8 +173,8 @@ export default function Home() {
     }
   }, []);
 
-  // Gemini Live prototype: OFF unless the page was opened with ?live=1 (remembered for this tab session).
-  const [liveOn, setLiveOn] = useState(false);
+  // Gemini Live is the default conversation engine. ?live=0 turns it off for this tab session; the older Web Speech path then runs.
+  const [liveOn, setLiveOn] = useState(true);
   const [debugOn, setDebugOn] = useState(false); // ?debug=1: show the Debug panel (in memory only)
   useEffect(() => {
     setDebugOn(new URLSearchParams(window.location.search).get("debug") === "1");
@@ -165,6 +185,13 @@ export default function Home() {
       ss = undefined;
     }
     setLiveOn(liveEnabled(window.location.search, ss));
+    try {
+      const l = readLang(window.localStorage);
+      setLangState(l);
+      langRef.current = l;
+    } catch {
+      /* English */
+    }
   }, []);
   const liveSettings = useRef<{ policy: Policy; limitMinor: string; nano: string }>({ policy, limitMinor, nano });
   liveSettings.current = { policy, limitMinor, nano };
@@ -205,6 +232,8 @@ export default function Home() {
       void speak(t);
     },
   });
+
+  liveRef.current = live;
 
   type Settings = { policy: Policy; limitMinor: string; nano: string };
 
@@ -476,7 +505,9 @@ export default function Home() {
   /** Speaks the template, then (voice only, never typed) listens once for yes or no. A yes only opens the usual check. */
   const announceRequest = useCallback(
     async (rq: ShopReq) => {
-      await speak(requestPrompt(rq.shopName, { value: rq.amountMinor, assetCode: rq.assetCode, assetScale: rq.assetScale }, rq.ref)).catch(() => undefined);
+      const amt = { value: rq.amountMinor, assetCode: rq.assetCode, assetScale: rq.assetScale };
+      const L = langRef.current;
+      await speak(L === "en" ? requestPrompt(rq.shopName, amt, rq.ref) : stringsFor(L).requestPrompt({ shop: rq.shopName, amount: amountSpoken(rq.amountMinor, L), ref: rq.ref })).catch(() => undefined);
       if (!readyRef.current || !micRef.current || busy.current || approvingRef.current || incomingRef.current?.id !== rq.id) return;
       busy.current = true;
       setListening(true);
@@ -566,33 +597,124 @@ export default function Home() {
     void say(t).catch(() => undefined); // the browser may block speech before a first tap; the text stays on screen
   }, []);
 
-  // Live mic button: start or stop the Live conversation. Falls back to the normal flow if Live fails.
-  const toggleLive = useCallback(async () => {
-    reportEvent({ event: "mic_tap", state: live.active ? "stop" : "start", speech: speechRef.current === "installable" ? "none" : speechRef.current });
-    if (live.active) {
-      await live.stop();
-      return;
-    }
+  // The voice conversation. Live is the default; if it cannot connect, the older Web Speech path takes over.
+  const liveUsable = liveOn && !live.failed;
+  const startLive = useCallback(async (): Promise<boolean> => {
     stopListening();
     lastInput.current = "typed"; // the normal hands-free loop stays off while Live is the voice
+    let ls: Storage | undefined;
+    try {
+      ls = window.localStorage;
+    } catch {
+      ls = undefined;
+    }
+    return live.start(langRef.current, ls ? openingTurn(ls) : APP_OPENED_AGAIN);
+  }, [live]);
+
+  /** First key press or tap: connect Live (inside the gesture, so sound and the microphone are allowed), then it greets first. */
+  const begun0 = useRef(false);
+  const beginApp = useCallback(() => {
+    if (begun0.current) return;
+    begun0.current = true;
+    setBegun(true);
+    reportEvent({ event: "mic_tap", state: "start", speech: speechRef.current === "installable" || speechRef.current === "checking" ? "none" : speechRef.current });
+    const liveP = liveOn ? startLive() : Promise.resolve(false); // first, synchronously: the audio context must be made inside the gesture
+    const prep = start(false).catch(() => {
+      setWorking("Something went wrong while starting. Please reload the page.");
+      return undefined;
+    });
+    void (async () => {
+      const ok = await liveP;
+      const settings = await prep;
+      if (!ok) {
+        // Live is off or did not connect: the older voice says hello, and Live's own message (if any) was already shown.
+        const hi = "Pay Alone is ready. Press the big button or the space bar, then say who to pay and how much.";
+        addTurn("app", hi);
+        await speak(hi).catch(() => undefined);
+      } else await live.afterGreeting();
+      // First run: a PIN and a fingerprint, before the first payment. Only when the server says there is no PIN yet.
+      if (settings && firebaseConfigured()) {
+        try {
+          const st = await api<{ hasPin: boolean }>("/api/setup/status", {});
+          if (st.ok && st.hasPin === false) setSetupOn(true);
+        } catch {
+          /* the payment card still sets a PIN when needed */
+        }
+      }
+    })();
+  }, [liveOn, startLive, start, addTurn, speak, live]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (begun) return;
+    const go = (e: Event) => {
+      if (e instanceof KeyboardEvent) {
+        if (!startKey(e.key)) return;
+        const t = e.target as HTMLElement | null;
+        if (t && (t.tagName === "SELECT" || t.tagName === "OPTION")) return; // choosing a language is not "start"
+        e.preventDefault();
+      } else {
+        const t = e.target as HTMLElement | null;
+        if (t?.closest?.(".startlang")) return;
+      }
+      beginApp();
+    };
+    window.addEventListener("keydown", go);
+    window.addEventListener("pointerdown", go);
+    return () => {
+      window.removeEventListener("keydown", go);
+      window.removeEventListener("pointerdown", go);
+    };
+  }, [begun, beginApp]);
+
+  // Live mic button / space bar: pause or resume the microphone. If Live is not running, start it again.
+  const toggleLive = useCallback(async () => {
+    reportEvent({ event: "mic_tap", state: live.active ? "stop" : "start", speech: speechRef.current === "installable" || speechRef.current === "checking" ? "none" : speechRef.current });
+    if (live.active) return live.togglePause();
     try {
       if (!ready) await start(false);
     } catch {
       /* typing and the normal flow still work */
     }
-    await live.start();
-  }, [live, ready]); // eslint-disable-line react-hooks/exhaustive-deps
+    await startLive();
+  }, [live, ready, startLive]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.code === "Space" && ready && !approving && document.activeElement?.tagName !== "INPUT") {
-        e.preventDefault();
-        void (liveOn && !live.failed ? toggleLive() : talk());
-      }
+      const tag = document.activeElement?.tagName;
+      if (e.code !== "Space" || !begun || approving || setupOn || tag === "INPUT" || tag === "SELECT" || tag === "BUTTON" || tag === "TEXTAREA") return;
+      e.preventDefault();
+      if (live.active) return live.togglePause();
+      if (!ready) return;
+      void (liveUsable ? toggleLive() : talk());
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [ready, talk, approving, liveOn, live.failed, toggleLive]);
+  }, [begun, ready, talk, approving, setupOn, live, liveUsable, toggleLive]);
+
+  // Closed microphone for Live while the first-run card is open (a PIN is being typed), open again after.
+  useEffect(() => {
+    if (!setupOn) return;
+    live.pauseMic();
+    return () => live.resume();
+  }, [setupOn]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Changing the language reconnects Live in the new one (a click or key press is a gesture, so audio is allowed).
+  const changeLang = useCallback(
+    async (c: LangCode) => {
+      setLangState(c);
+      langRef.current = c;
+      try {
+        writeLang(window.localStorage, c);
+      } catch {
+        /* the choice then lasts for this visit only */
+      }
+      if (live.active) {
+        await live.stop();
+        await live.start(c, APP_OPENED_AGAIN);
+      }
+    },
+    [live],
+  );
 
   // The same wallet connection the approval card offers: the wallet's own page sets the weekly limit.
   async function connectWallet() {
@@ -622,10 +744,10 @@ export default function Home() {
               ? "not available in this browser"
               : "off, type instead";
   const voiceWords = voice === "ready" ? "natural (on this computer)" : voice === "loading" ? "loading, browser voice meanwhile" : "browser";
-  const hint = live.active ? (approving ? "Approve on the card" : "Live voice is on. Talk, or tap to stop") : !ready ? "Tap to start talking" : listening ? "Listening…" : approving ? "Approve on the card, or say \"no\" to cancel" : "Tap and speak";
-  const micLabel = live.active ? "Live voice is on. Press to stop" : !ready ? "Tap to start talking" : listening ? "Listening. Press to stop" : "Press to speak (or Space)";
+  const hint = live.active ? (approving ? "Approve on the card" : live.paused ? "Microphone paused. Press Space to talk" : "Listening. Press Space to pause") : !ready ? "Tap to start talking" : listening ? "Listening…" : approving ? "Approve on the card, or say \"no\" to cancel" : "Tap and speak";
+  const micLabel = live.active ? (live.paused ? "Microphone is paused. Press to talk, or press Space" : "Microphone is on. Press to pause, or press Space") : !ready ? "Tap to start talking" : listening ? "Listening. Press to stop" : "Press to speak (or Space)";
   const onMic = () => {
-    if (liveOn && !live.failed) void toggleLive();
+    if (liveUsable) void toggleLive();
     else if (!ready) {
       reportEvent({ event: "mic_tap", state: "start", speech: speech === "installable" ? "none" : speech });
       void start().catch(() => setWorking("Something went wrong while starting. Please reload the page."));
@@ -660,6 +782,7 @@ export default function Home() {
               shopRequestId={approving.shopRequestId}
               reference={approving.reference}
               speak={speak}
+              lang={lang}
               onPaid={() => setHistoryKey((k) => k + 1)}
               listen={(() => {
                 const m = speechMode(speech === "checking" ? "none" : speech, cloudSpeech);
@@ -680,6 +803,23 @@ export default function Home() {
               }}
             />
   ) : null;
+  const setupEl = setupOn && !approving ? (
+    <Setup
+      speak={speak}
+      lang={lang}
+      listen={(() => {
+        const m = speechMode(speech === "checking" ? "none" : speech, cloudSpeech);
+        return m.mic ? () => listenOnce({ local: m.local }) : null;
+      })()}
+      onClose={() => setSetupOn(false)}
+    />
+  ) : null;
+  const langEl = (
+    <div className="langbar">
+      <LanguagePicker value={lang} onChange={(c) => void changeLang(c)} />
+    </div>
+  );
+  const startEl = !begun ? <StartLayer lang={lang} onLang={(c) => void changeLang(c)} onStart={beginApp} /> : null;
   const requestEl =
     incoming && !approving ? (
       <RequestCard
@@ -821,6 +961,7 @@ export default function Home() {
             </ol>
           )}
           {!wide && requestEl}
+          {!wide && setupEl}
           {!wide && approveEl}
     </div>
   );
@@ -839,8 +980,11 @@ export default function Home() {
 
   if (wide) {
     return (
-      <div className="app desk">
+      <>
+      {startEl}
+      <div className="app desk" inert={!begun}>
         <Header nano={nano} right={walletEl(true)} />
+        {langEl}
         <div className="grid">
           <section className={`convo${quiet ? " empty" : ""}`} aria-label="Conversation">
             <div className="scroll" ref={scrollRef}>
@@ -858,6 +1002,7 @@ export default function Home() {
               </div>
             )}
             {requestEl}
+            {setupEl}
             {approveEl}
             <PayCode speak={speak} />
             <div className="card hist"><History refreshKey={historyKey} speak={speak} /></div>
@@ -865,12 +1010,16 @@ export default function Home() {
           </aside>
         </div>
       </div>
+      </>
     );
   }
 
   return (
-    <div className="app">
+    <>
+    {startEl}
+    <div className="app" inert={!begun}>
       <Header nano={nano} />
+      {langEl}
       <div className="panel-body" role="tabpanel" id="panel-talk" aria-labelledby="tab-talk" hidden={tab !== "talk"}>
         {walletEl(false)}
         {welcomeEl}
@@ -903,5 +1052,6 @@ export default function Home() {
       </div>
       <Dock hint={hint} listening={listening || live.active} micLabel={micLabel} onMic={onMic} typed={typed} onTyped={setTyped} onSubmit={() => void submitTyped()} inputRef={inputBox} tab={tab} onTab={setTab} />
     </div>
+    </>
   );
 }

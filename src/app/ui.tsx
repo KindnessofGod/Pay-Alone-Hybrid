@@ -1,6 +1,7 @@
 // Presentational pieces of the screen. No logic and no data of their own: the page and Approve pass
 // everything in, and /design-preview passes fixed sample props.
 import { useEffect, type ReactNode, type Ref } from "react";
+import { LANGS, type LangCode } from "@/lib/hybrid/languages";
 import { reportEvent } from "@/lib/firebase/client";
 import { aiPill, sourceChip } from "@/lib/ui/status";
 import { formatPayCode, requestReceiptLine } from "@/lib/ui/requestprompt";
@@ -294,5 +295,100 @@ export function Dock({
         </>
       )}
     </div>
+  );
+}
+
+/** The AI voice's language. Labelled, native-name options, remembered by the page. */
+export function LanguagePicker({ value, onChange, id = "lang", className = "" }: { value: LangCode; onChange?: (c: LangCode) => void; id?: string; className?: string }) {
+  return (
+    <div className={`langpick ${className}`}>
+      <label htmlFor={id}>Language</label>
+      <select id={id} value={value} onChange={(e) => onChange?.(e.target.value as LangCode)}>
+        {LANGS.map((l) => (
+          <option key={l.code} value={l.code}>
+            {l.label}
+            {l.experimental ? " (experimental)" : ""}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+/**
+ * The first thing on screen. Browsers allow sound and the microphone only after a key press or tap, so this whole
+ * layer is one big button: any key, click or touch starts the app, and the voice then speaks first.
+ */
+export function StartLayer({ lang, onLang, onStart, busy = false }: { lang: LangCode; onLang?: (c: LangCode) => void; onStart?: () => void; busy?: boolean }) {
+  return (
+    <div className="startlayer" role="button" tabIndex={0} autoFocus aria-label="Pay Alone. Press any key or tap anywhere to start. Pay Alone will then speak to you." onClick={() => onStart?.()} aria-busy={busy}>
+      <div className="startinner">
+        <div className="mark big" aria-hidden="true">
+          <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3" /></svg>
+        </div>
+        <p className="startname">Pay alone.</p>
+        <p className="starttext">{busy ? "Starting…" : "Press any key or tap anywhere to start"}</p>
+        <p className="startsub">Pay Alone will speak to you first. You can talk to it. Test money only.</p>
+        <div className="startlang" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+          <LanguagePicker id="lang-start" value={lang} onChange={onLang} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Waiting for the fingerprint, Windows Hello or phone unlock. The voice says the same thing. */
+export function FingerprintWait({ title, hint, onPin, onCancel }: { title: string; hint: string; onPin?: () => void; onCancel?: () => void }) {
+  return (
+    <div className="fpwait" role="status">
+      <div className="fpicon" aria-hidden="true"><FingerprintIcon color="#0e7a55" /></div>
+      <p className="fptitle">{title}</p>
+      <p className="note">{hint}</p>
+      <div className="stack">
+        <button type="button" className="btn ghost" onClick={onPin}>Type my PIN instead</button>
+        <button type="button" className="btn quiet" onClick={onCancel}>Cancel (Esc)</button>
+      </div>
+    </div>
+  );
+}
+
+export type SetupStepView = "pin" | "confirm" | "saving" | "passkey" | "done";
+const SETUP_TITLES: Record<SetupStepView, { n: number; title: string }> = {
+  pin: { n: 1, title: "Choose a 4 digit PIN" },
+  confirm: { n: 2, title: "Type it again to confirm" },
+  saving: { n: 2, title: "Saving your PIN…" },
+  passkey: { n: 3, title: "Add your fingerprint or Windows Hello" },
+  done: { n: 3, title: "You're set" },
+};
+/** First-run setup, mirrored on screen with large controls. Everything shown here is also spoken. */
+export function SetupView({ step, pin, count, message, onPin, onSubmit, onFingerprint, onSkip, onFinish, inputRef }: { step: SetupStepView; pin: string; count: string; message: string; onPin?: (v: string) => void; onSubmit?: () => void; onFingerprint?: () => void; onSkip?: () => void; onFinish?: () => void; inputRef?: Ref<HTMLInputElement> }) {
+  const t = SETUP_TITLES[step];
+  const typing = step === "pin" || step === "confirm";
+  return (
+    <section className="pay setup" aria-label="First-time setup">
+      <p className="label">Set up Pay Alone · step {t.n} of 3</p>
+      <p className="msg">{t.title}</p>
+      {typing && (
+        <form onSubmit={(e) => (e.preventDefault(), onSubmit?.())}>
+          <label className="vh" htmlFor="setup-pin">{t.title}</label>
+          <input ref={inputRef} id="setup-pin" className="pin" type="password" inputMode="numeric" autoComplete="off" maxLength={6} autoFocus value={pin} onChange={(e) => onPin?.(e.target.value.replace(/\D/g, "").slice(0, 6))} />
+          <p className="note" aria-live="polite">{count}</p>
+          <button type="submit" className="btn primary">{step === "pin" ? "Continue (Enter)" : "Save my PIN (Enter)"}</button>
+        </form>
+      )}
+      {step === "passkey" && (
+        <div className="stack">
+          <button type="button" className="btn primary" onClick={onFingerprint}><FingerprintIcon /> Add fingerprint or Windows Hello</button>
+          <button type="button" className="btn ghost" onClick={onSkip}>Skip for now</button>
+        </div>
+      )}
+      {step === "done" && (
+        <div className="stack">
+          <p className="note">Your weekly limit is set on your wallet&apos;s own page when you connect it.</p>
+          <button type="button" className="btn primary" onClick={onFinish}>Done</button>
+        </div>
+      )}
+      {message && <p className="note" aria-live="polite">{message}</p>}
+    </section>
   );
 }

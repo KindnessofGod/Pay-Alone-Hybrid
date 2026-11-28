@@ -1,17 +1,20 @@
 "use client";
 // Approval of one payment. The server quotes, reads back and decides; this screen only collects the
 // PIN and sends it once. Voice can only say NO here: a spoken "yes" just asks for the PIN.
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, reportEvent } from "@/lib/firebase/client";
 import { yesNo } from "@/lib/hybrid/confirm";
+import { stopListening } from "@/lib/hybrid/listen";
+import { amountSpoken, stringsFor, type LangCode } from "@/lib/hybrid/languages";
+import { passkeyFailure, readBackFor, startKey } from "@/lib/ui/voiceflow";
 import { spokenSecret } from "@/lib/hybrid/tripwire";
-import { FINGERPRINT_FAILED, FINGERPRINT_OFFER, FINGERPRINT_PROMPT, fingerprintAvailable, fingerprintRequest } from "@/lib/ui/fingerprint";
+import { FINGERPRINT_FAILED, FINGERPRINT_OFFER, fingerprintAvailable, fingerprintRequest } from "@/lib/ui/fingerprint";
 import { formatAmount, nairaOf, type Amount } from "@/lib/money";
 import { bigAmount, isAmountView } from "@/lib/ui/amountview";
 import { approvalMessage } from "@/lib/ui/messages";
 import { pinAnnouncement, pinPress } from "@/lib/ui/pinpad";
 import { saveResume } from "@/lib/ui/resume";
-import { FingerprintIcon, PayCard, ReceiptCard } from "./ui";
+import { FingerprintIcon, FingerprintWait, PayCard, ReceiptCard } from "./ui";
 
 type Phase = "connect" | "starting" | "set_pin" | "confirm_pin" | "pin" | "offer_pin" | "sending" | "done" | "stopped";
 
@@ -27,6 +30,8 @@ interface Props {
   onClose(outcome: "paid" | "stopped"): void;
   /** Called the moment the server has saved a receipt, before the person closes the card. */
   onPaid?(): void;
+  /** Language of the AI voice: our money sentences are spoken in it (English is the team's own wording, the rest machine-translated). */
+  lang?: LangCode;
 }
 
 interface Receipt {
@@ -46,8 +51,18 @@ function alreadyDeclined(): boolean {
   }
 }
 
-export default function Approve({ payeeId, amountMinor, shopRequestId, reference, speak, listen, onClose, onPaid }: Props) {
-  const [phase, setPhase] = useState<Phase>("starting");
+export default function Approve({ payeeId, amountMinor, shopRequestId, reference, speak, listen, onClose, onPaid, lang = "en" }: Props) {
+  const S = stringsFor(lang);
+  const [phase, setPhaseState] = useState<Phase>("starting");
+  const phaseRef = useRef<Phase>("starting"); // the async steps below read the newest phase, not the one from when they started
+  const setPhase = useCallback((p: Phase) => {
+    phaseRef.current = p;
+    setPhaseState(p);
+  }, []);
+  const [waitingFp, setWaitingFp] = useState(false); // the device's fingerprint / Windows Hello prompt is open
+  const [needKey, setNeedKey] = useState(false); // the browser wants a key press before it shows that prompt
+  const cancelled = useRef(false);
+  const pinBox = useRef<HTMLInputElement>(null);
   const [pin, setPin] = useState("");
   const [firstPin, setFirstPin] = useState("");
   const [message, setMessage] = useState("");
@@ -76,6 +91,10 @@ export default function Approve({ payeeId, amountMinor, shopRequestId, reference
     }
   }
 
+  /** The spoken receipt: the server's English line, or our template built from the saved receipt in another language. */
+  const spokenReceiptFor = (rc: Receipt, serverSpoken: string): string =>
+    lang === "en" || rc.debit.assetCode !== "NGN" || rc.debit.assetScale !== 2 ? serverSpoken : S.receipt({ amount: amountSpoken(rc.debit.value, lang), name: rc.payeeName });
+
   const tell = async (t: string) => {
     setMessage(t);
     await speak(t);
@@ -90,8 +109,19 @@ export default function Approve({ payeeId, amountMinor, shopRequestId, reference
       const fp = Boolean(r.hasPasskey) && fingerprintAvailable();
       setHasPasskey(Boolean(r.hasPasskey));
       reportEvent({ event: "approve_open", method_offered: fp ? "passkey" : "pin" });
-      await tell(fp ? `${r.readBack} ${FINGERPRINT_PROMPT}` : r.readBack);
-      void voiceNo();
+      // The read-back is OUR template: English from the server quote, other languages built from the same quote.
+      const readBack = isAmountView(r.debit) && typeof r.payeeName === "string" ? readBackFor(lang, r.readBack, r.debit, r.payeeName) : r.readBack;
+      await tell(readBack);
+      if (cancelled.current) return;
+      if (fp) {
+        // Say what to do and, at the same moment, ask the device: Windows Hello, Touch ID or the phone's unlock opens.
+        setWaitingFp(true);
+        const said = tell(S.approveFingerprint);
+        void voiceNo(); // "cancel" or "no" by voice stops it; the browser listens only until the PIN pad opens
+        await Promise.all([said, approveWithFingerprint(true)]);
+      } else {
+        await askPin();
+      }
     } else if (r.reason === "no_pin_set") {
       setPhase("set_pin");
       await tell("First, choose a PIN of 4 to 6 digits. Type it on the keys. Never say it out loud.");
@@ -119,6 +149,17 @@ export default function Approve({ payeeId, amountMinor, shopRequestId, reference
     await tell("I could not reach your wallet. Nothing was changed. Please try again.");
   }
 
+  /** The PIN way: say how, put the cursor in the box, and stop listening (nobody should speak or be heard saying a PIN). */
+  async function askPin() {
+    stopListening();
+    setWaitingFp(false);
+    setNeedKey(false);
+    setShowPin(true);
+    pinBox.current?.focus();
+    await tell(S.typePin);
+    pinBox.current?.focus();
+  }
+
   // After the read-back the person may say "no". "Yes" only reminds them to type the PIN.
   async function voiceNo() {
     if (!listen) return;
@@ -127,21 +168,27 @@ export default function Approve({ payeeId, amountMinor, shopRequestId, reference
     if (spokenSecret(said).tripped) return void tell("Stop. Never say your PIN out loud. Type it on the keys.");
     const a = yesNo(said);
     if (a === "no") await cancel();
-    else if (a === "yes") await tell("Type your PIN to approve.");
+    else if (a === "yes") await tell(S.approveFingerprint);
   }
 
   async function cancel() {
+    cancelled.current = true;
+    stopListening();
+    setWaitingFp(false);
+    setNeedKey(false);
+    void import("@simplewebauthn/browser").then((m) => m.WebAuthnAbortService.cancelCeremony()).catch(() => undefined);
     reportEvent({ event: "approve_action", action: "cancel", outcome: "cancel", ms: lap() });
     paymentEnd("stopped");
     if (req.current) await call("/api/pay/cancel", { requestId: req.current.requestId }).catch(() => undefined);
     req.current = null;
     setPin("");
     setPhase("stopped");
-    await tell("Cancelled. Nothing was sent.");
+    await tell(S.cancelled);
   }
 
   async function submit() {
     const p = pin;
+    justSent.current = true;
     setPin(""); // the PIN leaves this screen's memory as soon as it is sent
     if (!/^\d{4,6}$/.test(p)) return void tell("A PIN has 4 to 6 digits.");
     if (phase === "set_pin") {
@@ -179,10 +226,11 @@ export default function Approve({ payeeId, amountMinor, shopRequestId, reference
       req.current = null;
       setReceipt(r.receipt);
       setApprovedBy("PIN");
-      setSpokenReceipt(r.spoken);
+      const said = spokenReceiptFor(r.receipt, r.spoken);
+      setSpokenReceipt(said);
       onPaid?.();
       setPhase("done");
-      await tell(r.spoken);
+      await tell(said);
       if (!hasPasskey && fingerprintAvailable() && !alreadyDeclined()) {
         setOffer(true);
         await speak(FINGERPRINT_OFFER);
@@ -201,34 +249,48 @@ export default function Approve({ payeeId, amountMinor, shopRequestId, reference
   }
 
   // Fingerprint: the device signs this payment's challenge; the server checks the signature and decides.
-  async function approveWithFingerprint() {
-    if (phase !== "pin" || !req.current) return;
+  // auto: started by the app itself (no tap). The browser may then want a key press first; we ask for one.
+  async function approveWithFingerprint(auto = false) {
+    if (phaseRef.current !== "pin" || !req.current || cancelled.current) return;
     const cur = req.current;
     setPhase("sending");
+    setWaitingFp(true);
+    setNeedKey(false);
     let response: unknown;
     const tF = performance.now();
     try {
       const { startAuthentication } = await import("@simplewebauthn/browser");
       response = await startAuthentication({ optionsJSON: fingerprintRequest(cur.challenge) });
-    } catch {
+    } catch (e) {
+      if (cancelled.current) return;
+      setPhase("pin"); // nothing reached the server, the same challenge still works
+      const kind = passkeyFailure(e instanceof Error ? e.name : "", performance.now() - tF);
+      if (kind === "aborted") return;
+      if (kind === "needs_gesture" && auto) {
+        setNeedKey(true);
+        return void (await tell(S.pressKeyFingerprint));
+      }
       reportEvent({ event: "approve_action", action: "fingerprint", outcome: "cancel", ms: Math.round(performance.now() - tF) });
-      setPhase("pin"); // cancelled or no sensor: nothing reached the server, the same challenge still works
-      return void tell(FINGERPRINT_FAILED);
+      setMessage(FINGERPRINT_FAILED);
+      return void (await askPin());
     }
+    setWaitingFp(false);
     const r = await call<{ receipt: Receipt; spoken: string; challenge?: string; triesLeft?: number }>("/api/pay/finish", {
       requestId: cur.requestId,
       proof: { method: "passkey", challenge: cur.challenge, response },
     });
     reportEvent({ event: "approve_action", action: "fingerprint", outcome: r.ok ? "ok" : "fail", ms: Math.round(performance.now() - tF) });
     if (r.ok) {
+      stopListening();
       paymentEnd("paid", r.receipt.simulated);
       req.current = null;
       setReceipt(r.receipt);
       setApprovedBy("fingerprint");
-      setSpokenReceipt(r.spoken);
+      const said = spokenReceiptFor(r.receipt, r.spoken);
+      setSpokenReceipt(said);
       onPaid?.();
       setPhase("done");
-      return void tell(r.spoken);
+      return void tell(said);
     }
     if (r.challenge) {
       req.current = { ...cur, challenge: r.challenge };
@@ -281,6 +343,46 @@ export default function Approve({ payeeId, amountMinor, shopRequestId, reference
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Escape cancels from anywhere on the card. While the browser wants a key press first, any key starts the fingerprint.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && phaseRef.current !== "done" && phaseRef.current !== "stopped" && phaseRef.current !== "connect") return void cancel();
+      if (needKey && startKey(e.key)) {
+        e.preventDefault();
+        setNeedKey(false);
+        void approveWithFingerprint(false);
+      }
+    };
+    const onTap = () => {
+      if (!needKey) return;
+      setNeedKey(false);
+      void approveWithFingerprint(false);
+    };
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("pointerdown", onTap);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("pointerdown", onTap);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [needKey]);
+
+  // The keypad speaks how MANY digits are typed, never which. One short phrase, after a short pause in typing.
+  const counted = useRef(0);
+  const justSent = useRef(false);
+  useEffect(() => {
+    const n = pin.length;
+    if (n === counted.current) return;
+    counted.current = n;
+    if (justSent.current) {
+      justSent.current = false;
+      return;
+    }
+    const t = setTimeout(() => void speak(S.digits(n)).catch(() => undefined), 350);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pin]);
+
   const typing = phase === "set_pin" || phase === "confirm_pin" || phase === "pin" || phase === "offer_pin";
   const fingerprintReady = phase === "pin" && hasPasskey && fingerprintAvailable();
   const title = phase === "set_pin" ? "Choose your PIN" : phase === "confirm_pin" ? "Type the same PIN again" : phase === "offer_pin" ? "Type your PIN to add your fingerprint" : phase === "pin" && hasPasskey ? "Or type your PIN to approve" : "Type your PIN to approve";
@@ -322,6 +424,17 @@ export default function Approve({ payeeId, amountMinor, shopRequestId, reference
 
   return (
     <PayCard label={paymentPhase ? "Please check this payment" : "Pay Alone"}>
+      {waitingFp && !showPin && (phase === "sending" || phase === "pin") && (
+        <FingerprintWait
+          title={needKey ? "Press any key to approve with your fingerprint" : "Use your fingerprint or Windows Hello now"}
+          hint={needKey ? "The browser needs one key press first." : "Say cancel, or press Esc, to stop. Nothing is sent until you approve."}
+          onPin={() => {
+            void import("@simplewebauthn/browser").then((m) => m.WebAuthnAbortService.cancelCeremony()).catch(() => undefined);
+            void askPin();
+          }}
+          onCancel={() => void cancel()}
+        />
+      )}
       {quote && paymentPhase && (
         <>
           <p className="amt">{bigAmount(quote.debit)}</p>
@@ -335,13 +448,13 @@ export default function Approve({ payeeId, amountMinor, shopRequestId, reference
       )}
       <p className={quote && paymentPhase && message === quote.readBack ? "vh" : "msg"} aria-live="polite">{message}</p>
       <div className="stack">
-        {fingerprintReady && (
+        {fingerprintReady && !waitingFp && (
           <button type="button" className="btn primary" onClick={() => void approveWithFingerprint()}>
             <FingerprintIcon /> Approve with fingerprint
           </button>
         )}
-        {fingerprintReady && !showPin && (
-          <button type="button" className="btn ghost" onClick={() => setShowPin(true)}>
+        {fingerprintReady && !showPin && !waitingFp && (
+          <button type="button" className="btn ghost" onClick={() => void askPin()}>
             Use my PIN instead
           </button>
         )}
@@ -364,7 +477,9 @@ export default function Approve({ payeeId, amountMinor, shopRequestId, reference
               maxLength={6}
               value={pin}
               autoFocus
-              onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
+              ref={pinBox}
+              onFocus={() => stopListening()}
+              onChange={(e) => (stopListening(), setPin(e.target.value.replace(/\D/g, "").slice(0, 6)))}
             />
             <p className="note" aria-live="polite">
               {pinAnnouncement(pin)}

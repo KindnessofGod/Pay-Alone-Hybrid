@@ -83,6 +83,8 @@ export interface Strings {
   setupMismatch: string;
   setupPasskey: string;
   setupSkipped: string;
+  pressKeyAdd: string;
+  weakPin: string;
   setupDone: string;
   needNumbers: string;
   genericError: string;
@@ -104,6 +106,8 @@ const en: Strings = {
   setupMismatch: "The two PINs were different. Let's try again. Type a 4 digit PIN, then press Enter.",
   setupPasskey: "Now let's add your fingerprint or Windows Hello, so you can approve without typing. Say skip to do this later.",
   setupSkipped: "Okay, skipped. You can add it later.",
+  pressKeyAdd: "Press any key to add your fingerprint.",
+  weakPin: "That PIN is too easy to guess. Type a different 4 digit PIN, then press Enter.",
   setupDone: "You're set. Your weekly limit is set on your wallet's own page when you connect it.",
   needNumbers: "Please say the amount in numbers.",
   genericError: "Something went wrong. Nothing was sent.",
@@ -125,6 +129,8 @@ const fr: Strings = {
   setupMismatch: "Les deux codes étaient différents. Recommençons. Tapez un code PIN à 4 chiffres, puis appuyez sur Entrée.",
   setupPasskey: "Ajoutons maintenant votre empreinte digitale ou Windows Hello, pour approuver sans taper. Dites passer pour le faire plus tard.",
   setupSkipped: "D'accord, c'est ignoré. Vous pourrez l'ajouter plus tard.",
+  pressKeyAdd: "Appuyez sur une touche pour ajouter votre empreinte digitale.",
+  weakPin: "Ce code PIN est trop facile à deviner. Tapez un autre code PIN à 4 chiffres, puis appuyez sur Entrée.",
   setupDone: "Tout est prêt. Votre limite hebdomadaire se règle sur la page de votre portefeuille, quand vous le connectez.",
   needNumbers: "Veuillez dire le montant en chiffres.",
   genericError: "Un problème est survenu. Rien n'a été envoyé.",
@@ -146,6 +152,8 @@ const es: Strings = {
   setupMismatch: "Los dos PIN eran distintos. Intentémoslo de nuevo. Escriba un PIN de 4 dígitos y pulse Intro.",
   setupPasskey: "Ahora añadamos su huella digital o Windows Hello, para aprobar sin escribir. Diga omitir para hacerlo más tarde.",
   setupSkipped: "De acuerdo, omitido. Puede añadirlo más tarde.",
+  pressKeyAdd: "Pulse cualquier tecla para añadir su huella digital.",
+  weakPin: "Ese PIN es demasiado fácil de adivinar. Escriba otro PIN de 4 dígitos y pulse Intro.",
   setupDone: "Todo listo. Su límite semanal se fija en la página de su billetera cuando la conecta.",
   needNumbers: "Por favor, diga la cantidad en números.",
   genericError: "Algo salió mal. No se envió nada.",
@@ -167,6 +175,8 @@ const pt: Strings = {
   setupMismatch: "Os dois PINs eram diferentes. Vamos tentar de novo. Digite um PIN de 4 dígitos e pressione Enter.",
   setupPasskey: "Agora vamos adicionar sua impressão digital ou o Windows Hello, para aprovar sem digitar. Diga pular para fazer depois.",
   setupSkipped: "Certo, pulado. Você pode adicionar depois.",
+  pressKeyAdd: "Pressione qualquer tecla para adicionar sua impressão digital.",
+  weakPin: "Esse PIN é fácil demais de adivinhar. Digite outro PIN de 4 dígitos e pressione Enter.",
   setupDone: "Tudo pronto. Seu limite semanal é definido na página da sua carteira quando você a conecta.",
   needNumbers: "Por favor, diga o valor em números.",
   genericError: "Algo deu errado. Nada foi enviado.",
@@ -188,6 +198,8 @@ const ar: Strings = {
   setupMismatch: "الرمزان مختلفان. لنحاول مرة أخرى. اكتب رمز PIN من 4 أرقام، ثم اضغط Enter.",
   setupPasskey: "الآن لنضف بصمتك أو Windows Hello، لتوافق دون كتابة. قل تخطي للقيام بذلك لاحقاً.",
   setupSkipped: "حسناً، تم التخطي. يمكنك إضافتها لاحقاً.",
+  pressKeyAdd: "اضغط أي مفتاح لإضافة بصمتك.",
+  weakPin: "هذا الرمز سهل التخمين. اكتب رمز PIN آخر من 4 أرقام، ثم اضغط Enter.",
   setupDone: "أنت جاهز. يُحدَّد حدّك الأسبوعي في صفحة محفظتك عند ربطها.",
   needNumbers: "من فضلك قل المبلغ بالأرقام.",
   genericError: "حدث خطأ. لم يُرسل شيء.",
@@ -209,6 +221,8 @@ const hi: Strings = {
   setupMismatch: "दोनों PIN अलग थे। फिर से कोशिश करते हैं। 4 अंकों का PIN टाइप करें, फिर Enter दबाएँ।",
   setupPasskey: "अब अपनी फ़िंगरप्रिंट या Windows Hello जोड़ें, ताकि आप बिना टाइप किए मंज़ूरी दे सकें। बाद में करने के लिए छोड़ें बोलें।",
   setupSkipped: "ठीक है, छोड़ दिया। आप इसे बाद में जोड़ सकते हैं।",
+  pressKeyAdd: "अपनी फ़िंगरप्रिंट जोड़ने के लिए कोई भी कुंजी दबाएँ।",
+  weakPin: "यह PIN अनुमान लगाने में बहुत आसान है। 4 अंकों का कोई और PIN टाइप करें, फिर Enter दबाएँ।",
   setupDone: "आप तैयार हैं। आपकी साप्ताहिक सीमा आपके वॉलेट के अपने पेज पर तय होती है, जब आप उसे जोड़ते हैं।",
   needNumbers: "कृपया राशि अंकों में बोलें।",
   genericError: "कुछ गड़बड़ हो गई। कुछ भी नहीं भेजा गया।",
@@ -230,6 +244,8 @@ const yo: Strings = {
   setupMismatch: "PIN méjèèjì yàtọ̀. Ẹ jẹ́ ká tún gbìyànjú. Ẹ tẹ PIN oní nọ́ńbà mẹ́rin, lẹ́yìn náà ẹ tẹ Enter.",
   setupPasskey: "Ní báyìí, ẹ jẹ́ ká fi ìka ọwọ́ yín tàbí Windows Hello kún un, kí ẹ lè fọwọ́ sí i láì tẹ̀. Ẹ sọ pé fò kọjá láti ṣe é lẹ́yìn.",
   setupSkipped: "Ó dára, a ti fò ó kọjá. Ẹ lè fi kún un lẹ́yìn.",
+  pressKeyAdd: "Ẹ tẹ bọ́tìnnì kankan láti fi ìka ọwọ́ yín kún un.",
+  weakPin: "PIN yẹn rọrùn jù láti ṣe àfidámọ̀. Ẹ tẹ PIN oní nọ́ńbà mẹ́rin mìíràn, lẹ́yìn náà ẹ tẹ Enter.",
   setupDone: "Ẹ ti ṣetán. A ṣètò ààlà ọ̀sẹ̀ yín lórí ojú-ewé àpamọ́wọ́ yín nígbà tí ẹ bá so ó pọ̀.",
   needNumbers: "Ẹ jọ̀wọ́, ẹ sọ iye owó náà ní nọ́ńbà.",
   genericError: "Nǹkan kan ṣẹlẹ̀. A kò fi nǹkan kan ránṣẹ́.",
@@ -251,6 +267,8 @@ const ha: Strings = {
   setupMismatch: "PIN ɗin biyu sun bambanta. Mu sake gwadawa. Ku rubuta PIN mai lambobi huɗu, sannan ku danna Enter.",
   setupPasskey: "Yanzu bari mu ƙara yatsanku ko Windows Hello, don ku amince ba tare da rubutu ba. Ku ce tsallake don yin hakan daga baya.",
   setupSkipped: "To, an tsallake. Kuna iya ƙara shi daga baya.",
+  pressKeyAdd: "Ku danna kowane maɓalli don ƙara yatsanku.",
+  weakPin: "Wannan PIN yana da sauƙin tsammani. Ku rubuta wani PIN mai lambobi huɗu, sannan ku danna Enter.",
   setupDone: "Kun shirya. Ana saita iyakar mako-mako a shafin walat ɗinku lokacin da kuka haɗa shi.",
   needNumbers: "Don Allah ku faɗi adadin da lambobi.",
   genericError: "Wani abu ya faru. Ba a aika komai ba.",

@@ -65,6 +65,10 @@ export function createPlayer() {
       sources.push(s);
       s.onended = () => (sources = sources.filter((x) => x !== s));
     },
+    /** Milliseconds of queued sound still to play, so callers can wait for the end of a sentence (the turn ends before the audio does). */
+    pendingMs() {
+      return Math.max(0, Math.round((at - ctx.currentTime) * 1000));
+    },
     flush() {
       for (const s of sources) {
         try {
