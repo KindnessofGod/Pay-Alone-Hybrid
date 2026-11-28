@@ -10,6 +10,7 @@ import { formatAmount } from "@/lib/money";
 import { approvalMessage } from "@/lib/ui/messages";
 import { pinAnnouncement, pinPress } from "@/lib/ui/pinpad";
 import { saveResume } from "@/lib/ui/resume";
+import { FingerprintIcon, PayCard, ReceiptCard } from "./ui";
 
 type Phase = "connect" | "starting" | "set_pin" | "confirm_pin" | "pin" | "offer_pin" | "sending" | "done" | "stopped";
 
@@ -47,6 +48,9 @@ export default function Approve({ payeeId, amountMinor, speak, listen, onClose, 
   const [message, setMessage] = useState("");
   const [receipt, setReceipt] = useState<Receipt | null>(null);
   const [hasPasskey, setHasPasskey] = useState(false);
+  const [showPin, setShowPin] = useState(false); // with a fingerprint on file the PIN pad opens on request
+  const [approvedBy, setApprovedBy] = useState<"PIN" | "fingerprint">("PIN");
+  const [spokenReceipt, setSpokenReceipt] = useState("");
   const [offer, setOffer] = useState(false); // after a PIN receipt: offer the fingerprint once
   const req = useRef<{ requestId: string; challenge: string } | null>(null);
   const started = useRef(false);
@@ -152,6 +156,8 @@ export default function Approve({ payeeId, amountMinor, speak, listen, onClose, 
     if (r.ok) {
       req.current = null;
       setReceipt(r.receipt);
+      setApprovedBy("PIN");
+      setSpokenReceipt(r.spoken);
       onPaid?.();
       setPhase("done");
       await tell(r.spoken);
@@ -191,6 +197,8 @@ export default function Approve({ payeeId, amountMinor, speak, listen, onClose, 
     if (r.ok) {
       req.current = null;
       setReceipt(r.receipt);
+      setApprovedBy("fingerprint");
+      setSpokenReceipt(r.spoken);
       onPaid?.();
       setPhase("done");
       return void tell(r.spoken);
@@ -248,94 +256,112 @@ export default function Approve({ payeeId, amountMinor, speak, listen, onClose, 
   const fingerprintReady = phase === "pin" && hasPasskey && fingerprintAvailable();
   const title = phase === "set_pin" ? "Choose your PIN" : phase === "confirm_pin" ? "Type the same PIN again" : phase === "offer_pin" ? "Type your PIN to add your fingerprint" : phase === "pin" && hasPasskey ? "Or type your PIN to approve" : "Type your PIN to approve";
 
-  return (
-    <section className="card approve" aria-label="Approve payment">
-      <p>{message}</p>
-      {fingerprintReady && (
-        <button type="button" className="big ok" onClick={() => void approveWithFingerprint()}>
-          Approve with fingerprint
-        </button>
-      )}
-      {typing && (
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            void submit();
-          }}
-        >
-          <label className="status" htmlFor="pin">
-            {title}
-          </label>
-          <input
-            id="pin"
-            className="pin"
-            type="password"
-            inputMode="numeric"
-            autoComplete="off"
-            maxLength={6}
-            value={pin}
-            autoFocus
-            onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
-          />
-          <p className="status" aria-live="polite">
-            {pinAnnouncement(pin)}
-          </p>
-          <div className="pad">
-            {["1", "2", "3", "4", "5", "6", "7", "8", "9", "back", "0", "clear"].map((k) => (
-              <button type="button" key={k} onClick={() => setPin((p) => pinPress(p, k))} aria-label={k === "back" ? "Delete one digit" : k === "clear" ? "Clear" : k}>
-                {k === "back" ? "⌫" : k === "clear" ? "C" : k}
+  const pinFormOpen = typing && !(fingerprintReady && !showPin);
+  const paymentPhase = phase === "pin" || phase === "sending" || phase === "starting";
+
+  if (phase === "done" && receipt) {
+    return (
+      <div className="chat" aria-label="Approve payment">
+        <ReceiptCard
+          amount={formatAmount(receipt.debit)}
+          to={receipt.payeeName}
+          how={`Approved with ${approvedBy} · ${new Date(receipt.createdAt).toLocaleTimeString([], { timeStyle: "short" })} · saved by the server`}
+          simulated={receipt.simulated}
+          onRead={spokenReceipt ? () => void speak(spokenReceipt).catch(() => undefined) : undefined}
+        />
+        <p className="note" aria-live="polite">{message}</p>
+        {offer && (
+          <div className="pay">
+            <p className="msg">{FINGERPRINT_OFFER}</p>
+            <div className="stack">
+              <button type="button" className="btn primary" onClick={() => (setOffer(false), setPhase("offer_pin"), void tell("Type your PIN to add your fingerprint."))}>
+                <FingerprintIcon /> Yes, add fingerprint
               </button>
-            ))}
+              <button type="button" className="btn ghost" onClick={() => void declineOffer()}>
+                Not now
+              </button>
+            </div>
           </div>
-          <div className="row">
-            <button type="submit" className="ok">
-              {phase === "pin" ? "Approve with PIN" : phase === "offer_pin" ? "Add fingerprint" : "Save"}
-            </button>
-            <button type="button" className="no" onClick={() => (phase === "offer_pin" ? (setPin(""), setPhase("done")) : void cancel())}>
-              {phase === "offer_pin" ? "Not now" : "No, cancel"}
-            </button>
-          </div>
-        </form>
-      )}
-      {phase === "connect" && (
-        <div className="row">
-          <button type="button" className="big" onClick={() => void connectWallet()}>
-            Connect wallet
-          </button>
-          <button type="button" className="no" onClick={() => onClose("stopped")}>
-            Not now
-          </button>
-        </div>
-      )}
-      {phase === "sending" && <p className="status">Checking on the server...</p>}
-      {receipt && (
-        <div className="receipt">
-          <p>
-            <b>Receipt</b> {receipt.simulated && <span className="badge bad">SIMULATED: no real money moved</span>}
-          </p>
-          <p className="status">
-            To {receipt.payeeName} · {formatAmount(receipt.debit)} · {new Date(receipt.createdAt).toLocaleString()} · saved by the server
-          </p>
-        </div>
-      )}
-      {phase === "done" && offer && (
-        <div className="receipt">
-          <p>{FINGERPRINT_OFFER}</p>
-          <div className="row">
-            <button type="button" className="ok" onClick={() => (setOffer(false), setPhase("offer_pin"), void tell("Type your PIN to add your fingerprint."))}>
-              Yes, add fingerprint
-            </button>
-            <button type="button" className="no" onClick={() => void declineOffer()}>
-              Not now
-            </button>
-          </div>
-        </div>
-      )}
-      {(phase === "done" || phase === "stopped") && (
-        <button type="button" onClick={() => onClose(phase === "done" ? "paid" : "stopped")}>
+        )}
+        <button type="button" className="btn ghost" onClick={() => onClose("paid")}>
           Done
         </button>
-      )}
-    </section>
+      </div>
+    );
+  }
+
+  return (
+    <PayCard label={paymentPhase ? "Please check this payment" : "Pay Alone"}>
+      <p className="msg" aria-live="polite">{message}</p>
+      <div className="stack">
+        {fingerprintReady && (
+          <button type="button" className="btn primary" onClick={() => void approveWithFingerprint()}>
+            <FingerprintIcon /> Approve with fingerprint
+          </button>
+        )}
+        {fingerprintReady && !showPin && (
+          <button type="button" className="btn ghost" onClick={() => setShowPin(true)}>
+            Use my PIN instead
+          </button>
+        )}
+        {pinFormOpen && (
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              void submit();
+            }}
+          >
+            <label className="pinlabel" htmlFor="pin">
+              {title}
+            </label>
+            <input
+              id="pin"
+              className="pin"
+              type="password"
+              inputMode="numeric"
+              autoComplete="off"
+              maxLength={6}
+              value={pin}
+              autoFocus
+              onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
+            />
+            <p className="note" aria-live="polite">
+              {pinAnnouncement(pin)}
+            </p>
+            <div className="pad">
+              {["1", "2", "3", "4", "5", "6", "7", "8", "9", "back", "0", "clear"].map((k) => (
+                <button type="button" key={k} onClick={() => setPin((p) => pinPress(p, k))} aria-label={k === "back" ? "Delete one digit" : k === "clear" ? "Clear" : k}>
+                  {k === "back" ? "⌫" : k === "clear" ? "C" : k}
+                </button>
+              ))}
+            </div>
+            <button type="submit" className="btn primary">
+              {phase === "pin" ? "Approve with PIN" : phase === "offer_pin" ? "Add fingerprint" : "Save"}
+            </button>
+          </form>
+        )}
+        {typing && (
+          <button type="button" className="btn quiet" onClick={() => (phase === "offer_pin" ? (setPin(""), setPhase("done")) : void cancel())}>
+            {phase === "offer_pin" ? "Not now" : "Cancel"}
+          </button>
+        )}
+        {phase === "connect" && (
+          <>
+            <button type="button" className="btn primary" onClick={() => void connectWallet()}>
+              Connect wallet
+            </button>
+            <button type="button" className="btn quiet" onClick={() => onClose("stopped")}>
+              Not now
+            </button>
+          </>
+        )}
+        {phase === "sending" && <p className="note">Checking on the server...</p>}
+        {(phase === "done" || phase === "stopped") && (
+          <button type="button" className="btn ghost" onClick={() => onClose(phase === "done" ? "paid" : "stopped")}>
+            Done
+          </button>
+        )}
+      </div>
+    </PayCard>
   );
 }

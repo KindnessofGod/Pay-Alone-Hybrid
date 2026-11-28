@@ -1,6 +1,6 @@
 "use client";
-// The voice screen. One big button. Everything is also spoken, and works with a screen reader and
-// with the keyboard only (Space to talk).
+// The voice screen: header, wallet, conversation, and a sticky dock with the big mic. Everything is also
+// spoken, and works with a screen reader and with the keyboard only (Space to talk).
 import { useCallback, useEffect, useRef, useState } from "react";
 import { understand, type Policy, type Understood } from "@/lib/hybrid/understand";
 import type { Contact } from "@/lib/hybrid/crosscheck";
@@ -16,17 +16,12 @@ import { chatReply, type ChatTurn } from "@/lib/hybrid/chat";
 import { afterPayment, chatOnly, initialDialog, next as dialogNext, silence, type DialogState } from "@/lib/hybrid/dialog";
 import { spokenSecret } from "@/lib/hybrid/tripwire";
 import Approve from "./Approve";
+import { Bubble, Chip, Dock, Header, PinStopped, WalletCard, type Tab } from "./ui";
 import History from "./History";
 import { takeResume, type Resume } from "@/lib/ui/resume";
 
 // SIMULATED test contacts until the saved-contacts screen exists (the server checks the same list).
 const CONTACTS: Contact[] = DEMO_CONTACTS.map((c) => ({ ...c }));
-
-const SOURCE_LABEL: Record<string, string> = {
-  on_device: "Understood on this computer (Gemini Nano)",
-  cloud: "Understood online (Gemini) - no names or amounts sent",
-  rules: "Understood instantly on this computer by plain rules (no AI needed)",
-};
 
 export default function Home() {
   const [ready, setReady] = useState(false);
@@ -36,6 +31,8 @@ export default function Home() {
   const [policy, setPolicy] = useState<Policy>("on_device_first");
   const [limitMinor, setLimitMinor] = useState("5000000");
   const [listening, setListening] = useState(false);
+  const [tab, setTab] = useState<Tab>("talk");
+  const [walletConnected, setWalletConnected] = useState(false);
   type Turn = { who: "you" | "app"; text: string; ai?: "on_device" | "cloud"; sent?: string };
   const [turns, setTurns] = useState<Turn[]>([]);
   const [typed, setTyped] = useState("");
@@ -273,6 +270,7 @@ export default function Home() {
           : "Wallet connected. Your weekly limit is set."
         : "The wallet was not connected. Nothing was changed. You can try again when you pay.";
     setWalletNote(t);
+    setWalletConnected(w === "connected");
     window.history.replaceState(null, "", window.location.pathname);
     void say(t).catch(() => undefined); // the browser may block speech before a first tap; the text stays on screen
   }, []);
@@ -288,119 +286,141 @@ export default function Home() {
     return () => window.removeEventListener("keydown", onKey);
   }, [ready, talk, approving]);
 
+  const speechWords = speech === "local" ? "on this computer" : speech === "server" ? "Google servers" : speech;
+  const voiceWords = voice === "ready" ? "natural (on this computer)" : voice === "loading" ? "loading, browser voice meanwhile" : "browser";
+  const hint = !ready ? "Tap to start" : listening ? "Listening…" : approving ? "Approve on the card, or say \"no\" to cancel" : "Tap and speak";
+  const micLabel = !ready ? "Tap to start" : listening ? "Listening. Press to stop" : "Press to speak (or Space)";
+  const onMic = () => {
+    if (!ready) void start().catch(() => setWorking("Something went wrong while starting. Please reload the page."));
+    else void talk();
+  };
+
+  // What the latest request showed: what the cloud received, skipped parts and model time. Kept in full.
+  const resultDetails =
+    result && result.kind !== "secret_spoken" ? (
+      <>
+        {"sentToCloud" in result && result.sentToCloud !== undefined && (
+          <p>
+            {result.source === "on_device" ? "The online model was also asked, in case this computer was slow, and received (its answer was not used): " : "What the cloud received: "}
+            <code>{result.sentToCloud}</code>
+          </p>
+        )}
+        {result.skipped?.map((w) => (
+          <p key={w}>Skipped {w}</p>
+        ))}
+        {ms > 0 && result.source !== "rules" && <p>Model time: {ms} ms</p>}
+      </>
+    ) : undefined;
+  const hasResultDetails = Boolean(result && result.kind !== "secret_spoken" && (("sentToCloud" in result && result.sentToCloud !== undefined) || result.skipped?.length || (ms > 0 && result.source !== "rules")));
+  const lastIsApp = turns.length > 0 && turns[turns.length - 1].who === "app";
+
   return (
-    <main>
-      <h1>Pay Alone</h1>
-      <p className="tag">Speak it. Approve it. The AI is never allowed to move your money.</p>
-
-      {!ready ? (
-        <button className="big" onClick={() => void start().catch(() => setWorking("Something went wrong while starting. Please reload the page."))}>
-          Start
-        </button>
-      ) : (
-        <button className="big" aria-pressed={listening} onClick={() => void talk()}>
-          {listening ? "Listening..." : "Press to speak (or Space)"}
-        </button>
-      )}
-
-      <div className="row">
-        <input ref={inputBox} aria-label="Or type what you want to do" placeholder="Or type: send 5000 naira to Mama Ade" value={typed} onChange={(e) => setTyped(e.target.value)} onKeyDown={(e) => e.key === "Enter" && void submitTyped()} />
-        <button onClick={() => void submitTyped()}>Go</button>
-      </div>
-
-      {ready && speech !== "local" && (
-        <p className="status">
-          <label>
-            <input type="checkbox" checked={cloudSpeech} onChange={(e) => setCloudSpeech(e.target.checked)} /> Use online speech recognition. Your voice
-            will be sent to Google. Never say a PIN.
-          </label>
-        </p>
-      )}
-
-      <div aria-live="polite">
-        {walletNote && <p className="status">{walletNote}</p>}
-        {resume && !approving && (
-          <button
-            className="big"
-            onClick={() => {
-              setApproving({ ...resume, key: Date.now() });
-              setResume(null);
-              setWalletNote("");
-            }}
-          >
-            Continue payment to {CONTACTS.find((c) => c.id === resume.payeeId)?.name ?? "your contact"}
-          </button>
-        )}
-        {working && <p className="status">{working}</p>}
-        {result && (
-          <div className="card">
-            <ol className="transcript" aria-label="Conversation">
-              {turns.map((t, i) => (
-                <li key={i}>
-                  <b>{t.who === "you" ? "You:" : "Pay Alone:"}</b> {t.text}
-                  {t.ai && <span className={`badge ${t.ai}`}> {t.ai === "on_device" ? "on this computer" : "online, names and amounts hidden"}</span>}
-                  {t.sent && (
-                    <p className="status">
-                      {t.ai === "on_device" ? "The online model was also asked, in case this computer was slow, and received (its answer was not used): " : "What the cloud received: "}
-                      <code>{t.sent}</code>
-                    </p>
-                  )}
+    <div className="app">
+      <Header nano={nano} />
+      <div className="panel-body" role="tabpanel" id="panel-talk" aria-labelledby="tab-talk" hidden={tab !== "talk"}>
+        <WalletCard note={walletNote} connected={walletConnected}>
+          {resume && !approving && (
+            <button
+              type="button"
+              className="btn primary"
+              onClick={() => {
+                setApproving({ ...resume, key: Date.now() });
+                setResume(null);
+                setWalletNote("");
+              }}
+            >
+              Continue payment to {CONTACTS.find((c) => c.id === resume.payeeId)?.name ?? "your contact"}
+            </button>
+          )}
+        </WalletCard>
+        <div aria-live="polite" className="chat">
+          {working && <p className="working">{working}</p>}
+          {turns.length > 0 && (
+            <ol className="chat" aria-label="Conversation">
+              {turns.map((t, i) => {
+                const last = i === turns.length - 1 && t.who === "app";
+                const sent = t.sent ? (
+                  <p>
+                    {t.ai === "on_device" ? "The online model was also asked, in case this computer was slow, and received (its answer was not used): " : "What the cloud received: "}
+                    <code>{t.sent}</code>
+                  </p>
+                ) : null;
+                const extra = last && hasResultDetails ? resultDetails : null;
+                const details = sent || extra ? <>{sent}{extra}</> : undefined;
+                const chip = t.who === "app" ? (t.ai ? <Chip source={t.ai} details={details} /> : last && result && result.kind !== "secret_spoken" ? <Chip source={result.source} details={details} /> : undefined) : undefined;
+                return (
+                  <Bubble key={i} who={t.who} chip={chip}>
+                    {t.text}
+                  </Bubble>
+                );
+              })}
+              {result?.kind === "secret_spoken" && <PinStopped />}
+              {!lastIsApp && result && result.kind !== "secret_spoken" && (
+                <li className="b ai">
+                  <Chip source={result.source} details={hasResultDetails ? resultDetails : undefined} />
                 </li>
-              ))}
+              )}
             </ol>
-            {result.kind === "secret_spoken" ? (
-              <span className="badge bad">PIN stopped before any AI saw it</span>
-            ) : (
-              <span className={`badge ${result.source}`}>{SOURCE_LABEL[result.source]}</span>
-            )}
-            {"sentToCloud" in result && result.sentToCloud !== undefined && (
-              <p className="status">
-                {result.source === "on_device" ? "The online model was also asked, in case this computer was slow, and received (its answer was not used): " : "What the cloud received: "}
-                <code>{result.sentToCloud}</code>
-              </p>
-            )}
-            {result.skipped?.map((w) => (
-              <p className="status" key={w}>
-                Skipped {w}
-              </p>
-            ))}
-            {ms > 0 && result.kind !== "secret_spoken" && result.source !== "rules" && <p className="status">Model time: {ms} ms</p>}
-          </div>
-        )}
-        {approving && (
-          <Approve
-            key={approving.key}
-            payeeId={approving.payeeId}
-            amountMinor={approving.amountMinor}
-            speak={speak}
-            onPaid={() => setHistoryKey((k) => k + 1)}
-            listen={(() => {
-              const m = speechMode(speech === "checking" ? "none" : speech, cloudSpeech);
-              return m.mic ? () => listenOnce({ local: m.local }) : null;
-            })()}
-            onClose={(outcome) => {
-              stopListening(); // the approval card may still have the mic open for "no"
-              setApproving(null);
-              seq.current++; // anything still running from before no longer owns the screen
-              const my = seq.current;
-              const o = afterPayment(dialog.current, outcome);
-              dialog.current = o.state;
-              addTurn("app", o.say);
-              void speak(o.say).then(() => {
-                if (my === seq.current && lastInput.current === "voice" && speechMode(speech === "checking" ? "none" : speech, cloudSpeech).mic) void talkRef.current(true);
-              });
-            }}
-          />
+          )}
+          {approving && (
+            <Approve
+              key={approving.key}
+              payeeId={approving.payeeId}
+              amountMinor={approving.amountMinor}
+              speak={speak}
+              onPaid={() => setHistoryKey((k) => k + 1)}
+              listen={(() => {
+                const m = speechMode(speech === "checking" ? "none" : speech, cloudSpeech);
+                return m.mic ? () => listenOnce({ local: m.local }) : null;
+              })()}
+              onClose={(outcome) => {
+                stopListening(); // the approval card may still have the mic open for "no"
+                setApproving(null);
+                seq.current++; // anything still running from before no longer owns the screen
+                const my = seq.current;
+                const o = afterPayment(dialog.current, outcome);
+                dialog.current = o.state;
+                addTurn("app", o.say);
+                void speak(o.say).then(() => {
+                  if (my === seq.current && lastInput.current === "voice" && speechMode(speech === "checking" ? "none" : speech, cloudSpeech).mic) void talkRef.current(true);
+                });
+              }}
+            />
+          )}
+        </div>
+        {ready && speech !== "local" && (
+          <p className="note">
+            <label>
+              <input type="checkbox" checked={cloudSpeech} onChange={(e) => setCloudSpeech(e.target.checked)} />
+              <span>Use online speech recognition. Your voice will be sent to Google. Never say a PIN.</span>
+            </label>
+          </p>
         )}
       </div>
-
-      <History refreshKey={historyKey} speak={speak} />
-
-      <p className="status">
-        Gemini Nano: <b>{nano}</b> · Speech recognition: <b>{speech === "local" ? "on this computer" : speech === "server" ? "Google servers" : speech}</b> · Voice: <b>{voice === "ready" ? "natural (on this computer)" : voice === "loading" ? "loading, browser voice meanwhile" : "browser"}</b> · Policy: <b>{policy}</b>
-        {!firebaseConfigured() && <> · <b>Firebase not configured: plain rules only</b></>}
-      </p>
-      <p className="sim">Test contacts (simulated): Mama Ade, Tunde, Chidi Okafor. Test money only.</p>
-    </main>
+      <div className="panel-body" role="tabpanel" id="panel-receipts" aria-labelledby="tab-receipts" hidden={tab !== "receipts"}>
+        <History refreshKey={historyKey} speak={speak} />
+      </div>
+      <div className="panel-body" role="tabpanel" id="panel-privacy" aria-labelledby="tab-privacy" hidden={tab !== "privacy"}>
+        <section className="card" aria-labelledby="privacy-h">
+          <h2 id="privacy-h">Privacy</h2>
+          <p>
+            <b>On this device:</b> when Gemini Nano is ready, your words are understood inside this browser and go nowhere.
+          </p>
+          <p>
+            <b>Online, hidden:</b> if the cloud model is used, it only receives text with names and amounts replaced. A spoken PIN is stopped before any AI or network call.
+          </p>
+          <p>The AI never approves or sends money. You approve each payment yourself on the card.</p>
+          <p>Test money only. Test contacts (Mama Ade, Tunde, Chidi Okafor) are simulated.</p>
+          <div className="facts">
+            <span>Gemini Nano: <b>{nano}</b></span>
+            <span>Speech recognition: <b>{speechWords}</b></span>
+            <span>Voice: <b>{voiceWords}</b></span>
+            <span>Policy: <b>{policy}</b></span>
+            {!firebaseConfigured() && <span><b>Firebase not configured: plain rules only</b></span>}
+          </div>
+        </section>
+      </div>
+      <Dock hint={hint} listening={listening} micLabel={micLabel} onMic={onMic} typed={typed} onTyped={setTyped} onSubmit={() => void submitTyped()} inputRef={inputBox} tab={tab} onTab={setTab} />
+    </div>
   );
 }

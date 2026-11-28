@@ -4,6 +4,8 @@
 // visitor in just to look).
 import { useCallback, useEffect, useState } from "react";
 import { api, firebaseConfigured, reportEvent } from "@/lib/firebase/client";
+import { formatAmount } from "@/lib/money";
+import { ReceiptRow } from "./ui";
 import { activityLine, badgeOf, receiptSentence, type EventView, type ReceiptView } from "@/lib/ui/history";
 
 type Loaded = { receipts: ReceiptView[]; events: EventView[] };
@@ -39,41 +41,39 @@ export default function History({ refreshKey, speak }: { refreshKey: number; spe
 
   const last = data?.receipts[0];
   return (
-    <section className="card" aria-labelledby="history-h">
-      <h2 id="history-h">My receipts and activity</h2>
-      <div className="row">
-        <button type="button" onClick={() => void load(true)} disabled={busy}>
+    <section aria-labelledby="history-h" className="chat">
+      <h2 id="history-h" className="h3">Recent receipts</h2>
+      <div className="row2">
+        <button type="button" className="btn ghost small" onClick={() => void load(true)} disabled={busy}>
           {data ? "Refresh" : "Show my receipts and activity"}
         </button>
-        <button
-          type="button"
-          disabled={!last}
-          onClick={() => void speak(last ? receiptSentence(last) : "").catch(() => undefined)}
-        >
-          Read my last receipt
+        <button type="button" className="btn ghost small" disabled={!last} onClick={() => void speak(last ? receiptSentence(last) : "").catch(() => undefined)}>
+          <span aria-hidden="true">🔊</span> Read my last receipt
         </button>
       </div>
       <div aria-live="polite">
-        {note && <p className="status">{note}</p>}
-        {busy && <p className="status">Loading…</p>}
-        {data && data.receipts.length === 0 && <p className="status">No saved receipts yet.</p>}
+        {note && <p className="note">{note}</p>}
+        {busy && <p className="note">Loading…</p>}
+        {data && data.receipts.length === 0 && <p className="note">No saved receipts yet.</p>}
       </div>
       {data && data.receipts.length > 0 && (
-        <>
-          <h3>Receipts</h3>
-          <ul aria-label="Receipts, newest first">
-            {data.receipts.map((r) => (
-              <li key={r.id}>
-                <span className={`badge ${r.simulated ? "rules" : "on_device"}`}>{badgeOf(r)}</span> {receiptSentence(r)}
-              </li>
-            ))}
-          </ul>
-        </>
+        <ul className="list" aria-label="Receipts, newest first">
+          {data.receipts.map((r) => (
+            <ReceiptRow
+              key={r.id}
+              name={r.payeeName}
+              sub={`${new Date(r.createdAt).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })} · ${r.method === "passkey" ? "fingerprint" : "PIN"}`}
+              amount={formatAmount(r.debit)}
+              badge={badgeOf(r)}
+              simulated={r.simulated}
+            />
+          ))}
+        </ul>
       )}
       {data && data.events.length > 0 && (
         <>
-          <h3>Activity</h3>
-          <ul aria-label="Activity, newest first" className="status">
+          <h3 className="h3">Activity</h3>
+          <ul aria-label="Activity, newest first" className="note">
             {data.events.map((e, i) => (
               <li key={`${e.at}-${i}`}>{activityLine(e)}</li>
             ))}
