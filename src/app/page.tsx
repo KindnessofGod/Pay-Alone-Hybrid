@@ -146,6 +146,7 @@ export default function Home() {
       try {
         r = justChat ? { kind: "unclear", source: "rules" } : await understand(said, { contacts: CONTACTS, limitMinor: c.limitMinor, policy: c.policy, deviceAvailable: c.nano === "available" || c.nano === "warming up", instant: true }, {
           // Say on screen which step is running, so a slow step never looks like a frozen app.
+          onDeviceBusy: firebaseEngines.onDeviceBusy,
           onDevice: (x) => (setWorking("Thinking on this computer (Gemini Nano)…"), firebaseEngines.onDevice(x)),
           cloud: (x) => (setWorking("Asking online, with names and amounts hidden…"), firebaseEngines.cloud(x)),
         });
@@ -171,6 +172,7 @@ export default function Home() {
         setWorking("Thinking…");
         try {
           const cr = await chatReply(history.current, said, { contacts: CONTACTS, policy: c.policy, deviceAvailable: c.nano === "available" || c.nano === "warming up" }, {
+            onDeviceBusy: chatEngines.onDeviceBusy,
             onDevice: (x) => (setWorking("Thinking on this computer (Gemini Nano)…"), chatEngines.onDevice(x)),
             cloud: (x) => (setWorking("Asking online, with names and amounts hidden…"), chatEngines.cloud(x)),
           });
@@ -337,7 +339,12 @@ export default function Home() {
                 <li key={i}>
                   <b>{t.who === "you" ? "You:" : "Pay Alone:"}</b> {t.text}
                   {t.ai && <span className={`badge ${t.ai}`}> {t.ai === "on_device" ? "on this computer" : "online, names and amounts hidden"}</span>}
-                  {t.ai === "cloud" && t.sent && <p className="status">What the cloud received: <code>{t.sent}</code></p>}
+                  {t.sent && (
+                    <p className="status">
+                      {t.ai === "on_device" ? "The online model was also asked, in case this computer was slow, and received (its answer was not used): " : "What the cloud received: "}
+                      <code>{t.sent}</code>
+                    </p>
+                  )}
                 </li>
               ))}
             </ol>
@@ -347,7 +354,10 @@ export default function Home() {
               <span className={`badge ${result.source}`}>{SOURCE_LABEL[result.source]}</span>
             )}
             {"sentToCloud" in result && result.sentToCloud !== undefined && (
-              <p className="status">What the cloud received: <code>{result.sentToCloud}</code></p>
+              <p className="status">
+                {result.source === "on_device" ? "The online model was also asked, in case this computer was slow, and received (its answer was not used): " : "What the cloud received: "}
+                <code>{result.sentToCloud}</code>
+              </p>
             )}
             {result.skipped?.map((w) => (
               <p className="status" key={w}>

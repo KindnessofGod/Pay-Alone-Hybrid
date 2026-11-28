@@ -114,26 +114,36 @@ export interface LastCall {
 }
 export const lastCall: LastCall = { ms: 0 };
 
-async function run(model: GenerativeModel, text: string): Promise<string> {
+// On-device and cloud calls can now overlap, so each call returns ITS OWN source; lastCall is only for the timing display.
+async function run(model: GenerativeModel, text: string): Promise<{ text: string; source?: InferenceSource }> {
   const t0 = performance.now();
   const result = await model.generateContent(text);
   lastCall.ms = Math.round(performance.now() - t0);
   lastCall.source = result.response.inferenceSource;
-  return result.response.text();
+  return { text: result.response.text(), source: result.response.inferenceSource };
 }
 
 // One on-device call at a time, intent and chat alike: the SDK destroys the previous Chrome session when it
 // starts a new one.
 const onDeviceQueue = oneAtATime(<T>(job: () => Promise<T>) => job());
 
+let queued = 0;
+/** True while an on-device call is waiting or running. An abandoned slow call keeps this true until it ends. */
+export const onDeviceBusy = (): boolean => queued > 0;
+
 async function onDeviceCall(model: GenerativeModel, text: string, ms: number): Promise<string> {
-  return onDeviceQueue(async () => {
-    // On a CPU-only PC the first answer includes loading the model into memory; warmUpOnDevice() does that early.
-    const out = await failAfter(run(model, text), ms, "Gemini Nano");
-    // Honesty guard: only count an answer as on-device if the SDK says it ran on the device.
-    if (lastCall.source !== InferenceSource.ON_DEVICE) throw new Error("not answered on device");
-    return out;
-  });
+  queued++;
+  try {
+    return await onDeviceQueue(async () => {
+      // On a CPU-only PC the first answer includes loading the model into memory; warmUpOnDevice() does that early.
+      const out = await failAfter(run(model, text), ms, "Gemini Nano");
+      // Honesty guard: only count an answer as on-device if the SDK says it ran on the device.
+      if (out.source !== InferenceSource.ON_DEVICE) throw new Error("not answered on device");
+      return out.text;
+    });
+  } finally {
+    queued--;
+  }
 }
 const onDeviceOnce = (said: string) => onDeviceCall(onDevice(), prompt(said), 30_000);
 
@@ -147,7 +157,8 @@ export function warmUpOnDevice(): Promise<boolean> {
 
 export const firebaseEngines: Engines = {
   onDevice: onDeviceOnce,
-  cloud: (said) => failAfter(run(cloud(), prompt(said)), 10_000, "The online model"),
+  cloud: async (said) => (await failAfter(run(cloud(), prompt(said)), 10_000, "The online model")).text,
+  onDeviceBusy,
 };
 
 /** The open conversation. The prompt already holds the persona and history (chat.ts); the cloud one is redacted there. */
@@ -156,7 +167,8 @@ export const chatEngines: ChatEngines = {
   cloud: async (text) => {
     const out = await failAfter(run(chatCloud(), text), 10_000, "The online model");
     // Honesty guard: only count it as online if the SDK says so.
-    if (lastCall.source !== InferenceSource.IN_CLOUD) throw new Error("not answered online");
-    return out;
+    if (out.source !== InferenceSource.IN_CLOUD) throw new Error("not answered online");
+    return out.text;
   },
+  onDeviceBusy,
 };
