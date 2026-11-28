@@ -14,6 +14,7 @@ import { spokenSecret } from "./tripwire";
 import { LONG_NUMBER, SPELLED_RUN, splitSentences, unsafeToSpeak } from "./tts";
 import { decideRoute, reason as errorReason, type Policy } from "./understand";
 import type { Contact } from "./crosscheck";
+import { HEAD_START_MS, raceOnDeviceFirst } from "./race";
 
 export interface ChatTurn {
   who: "you" | "app";
@@ -23,6 +24,10 @@ export interface ChatEngines {
   /** Plain text out. Throws if the on-device model is unavailable. */
   onDevice: (prompt: string) => Promise<string>;
   cloud: (prompt: string) => Promise<string>;
+  /** Under on_device_first, how long Nano is alone before the cloud is started too. Default 2500 ms. */
+  headStartMs?: number;
+  /** True while an earlier on-device call is still running (it cannot be cancelled). */
+  onDeviceBusy?: () => boolean;
 }
 export interface RateGuard {
   take(): boolean;
@@ -159,10 +164,47 @@ export async function chatReply(history: ChatTurn[], said: string, ctx: ChatCont
     ...(skipped.length ? { skipped } : {}),
   });
 
+  const devPrompt = () => `${PERSONA}\n\n${[...turns, { who: "you" as const, text: said }].map((t) => line(t.who, t.text)).join("\n")}\nassistant:`;
+  const names = ctx.contacts.map((c) => c.name);
+  const cloudBody = () => [...turns, { who: "you" as const, text: said }].map((t) => line(t.who, redactForCloud(t.text, names).text)).join("\n");
+
+  if (route === "on_device" && ctx.policy === "on_device_first" && engines.onDeviceBusy?.()) {
+    skipped.push("on-device: still busy with the last answer");
+    route = "cloud";
+  }
+  if (route === "on_device" && ctx.policy === "on_device_first") {
+    // Nano gets a head start; if it is slow the cloud is started too and the first usable answer wins.
+    let sent: string | undefined;
+    const usableText = (out: unknown) => (clean(String(out ?? "")) ? String(out) : null);
+    const r = await raceOnDeviceFirst<string>(
+      engines.onDevice(devPrompt()).then(usableText),
+      () => {
+        if (!(ctx.rate ?? cloudChatRate).take()) {
+          skipped.push("online: too many online chat calls this minute");
+          return undefined;
+        }
+        sent = cloudBody();
+        return engines.cloud(`${PERSONA}\n\n${sent}\nassistant:`).then(usableText);
+      },
+      engines.headStartMs ?? HEAD_START_MS,
+    );
+    const note = (who: "on-device" | "online", o: typeof r.device | typeof r.cloud) => {
+      if (o === "pending" || o === "not_started") return;
+      skipped.push(o.ok ? `${who}: empty answer` : `${who}: ${errorReason(o.error, said)}`);
+    };
+    if (r.winner === "on_device") return done(r.value as string, "on_device", sent);
+    if (r.winner === "cloud") {
+      if (r.device === "pending") skipped.push("on-device: slower than the head start, online answered first");
+      else note("on-device", r.device);
+      return done(r.value as string, "cloud", sent);
+    }
+    note("on-device", r.device);
+    note("online", r.cloud);
+    return { kind: "none", skipped };
+  }
   if (route === "on_device") {
-    const prompt = `${PERSONA}\n\n${[...turns, { who: "you" as const, text: said }].map((t) => line(t.who, t.text)).join("\n")}\nassistant:`;
     try {
-      const out = await engines.onDevice(prompt);
+      const out = await engines.onDevice(devPrompt());
       if (clean(String(out ?? ""))) return done(out, "on_device");
       skipped.push("on-device: empty answer");
     } catch (e) {
@@ -174,8 +216,7 @@ export async function chatReply(history: ChatTurn[], said: string, ctx: ChatCont
     if (!(ctx.rate ?? cloudChatRate).take()) {
       skipped.push("online: too many online chat calls this minute");
     } else {
-      const names = ctx.contacts.map((c) => c.name);
-      const body = [...turns, { who: "you" as const, text: said }].map((t) => line(t.who, redactForCloud(t.text, names).text)).join("\n");
+      const body = cloudBody();
       try {
         const out = await engines.cloud(`${PERSONA}\n\n${body}\nassistant:`);
         if (clean(String(out ?? ""))) return done(out, "cloud", body);

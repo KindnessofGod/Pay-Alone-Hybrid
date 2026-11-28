@@ -190,3 +190,78 @@ describe("examples", () => {
     expect(r).toMatchObject({ source: "on_device", guarded: false });
   });
 });
+
+describe("chatReply: on-device head start, then race the cloud", () => {
+  const later = (ms: number, v: string | Error) => new Promise<string>((res, rej) => setTimeout(() => (v instanceof Error ? rej(v) : res(v)), ms));
+  const mk = (dev: () => Promise<string>, cld: () => Promise<string>) => ({ onDevice: vi.fn(dev), cloud: vi.fn(cld) });
+  const ctx = (extra = {}) => ({ ...base, rate: createRateGuard(100, 60_000), ...extra });
+  const said = "tell Tunde and 5000 hello how are you";
+
+  it("Nano fast: on_device, the cloud is never called", async () => {
+    const e = { ...mk(() => later(3, "Nano here."), () => later(1, "Cloud here.")), headStartMs: 60 };
+    const r = await chatReply([], said, ctx(), e);
+    expect(r).toMatchObject({ kind: "reply", source: "on_device", text: "Nano here." });
+    expect(e.cloud).not.toHaveBeenCalled();
+    expect((r as { sentToCloud?: string }).sentToCloud).toBeUndefined();
+  });
+  it("Nano slow, cloud fast: cloud used, digit-free note, redacted text sent", async () => {
+    const e = { ...mk(() => later(300, "Nano late."), () => later(3, "Cloud here.")), headStartMs: 15 };
+    const r = await chatReply([], said, ctx(), e);
+    expect(r).toMatchObject({ kind: "reply", source: "cloud", text: "Cloud here." });
+    if (r.kind !== "reply") throw new Error();
+    expect(r.skipped?.join(" ")).toContain("slower than the head start");
+    for (const s of r.skipped ?? []) expect(s).not.toMatch(/\d/);
+    expect(r.sentToCloud).not.toMatch(/Tunde|5000/);
+    expect((e.cloud.mock.calls[0] as string[])[0].split("\n\n")[1]).not.toMatch(/Tunde|5000/);
+  });
+  it("Nano slow but finishes before the cloud: on_device, and the cloud send is still reported", async () => {
+    const e = { ...mk(() => later(40, "Nano late."), () => later(300, "Cloud late.")), headStartMs: 15 };
+    const r = await chatReply([], said, ctx(), e);
+    expect(r).toMatchObject({ kind: "reply", source: "on_device", text: "Nano late." });
+    expect(e.cloud).toHaveBeenCalledTimes(1);
+    expect((r as { sentToCloud?: string }).sentToCloud).toBeTypeOf("string");
+  });
+  it("Nano throws fast: cloud at once, with the reason", async () => {
+    const e = { ...mk(() => later(1, new Error("no nano")), () => later(2, "Cloud here.")), headStartMs: 5000 };
+    const r = await chatReply([], said, ctx(), e);
+    expect(r).toMatchObject({ kind: "reply", source: "cloud" });
+  });
+  it("both fail: same fallback as before", async () => {
+    const e = { ...mk(() => later(20, new Error("no nano")), () => later(2, new Error("offline"))), headStartMs: 5 };
+    const r = await chatReply([], said, ctx(), e);
+    expect(r.kind).toBe("none");
+    if (r.kind === "none") expect(r.skipped.length).toBeGreaterThanOrEqual(2);
+  });
+  it("on_device_only never calls the cloud", async () => {
+    const e = { ...mk(() => later(40, "Nano late."), () => later(1, "Cloud.")), headStartMs: 5 };
+    const r = await chatReply([], said, ctx({ policy: "on_device_only" }), e);
+    expect(r).toMatchObject({ kind: "reply", source: "on_device" });
+    expect(e.cloud).not.toHaveBeenCalled();
+  });
+  it("cloud_only never calls the device", async () => {
+    const e = { ...mk(() => later(1, "Nano."), () => later(1, "Cloud.")), headStartMs: 5 };
+    const r = await chatReply([], said, ctx({ policy: "cloud_only" }), e);
+    expect(r).toMatchObject({ kind: "reply", source: "cloud" });
+    expect(e.onDevice).not.toHaveBeenCalled();
+  });
+  it("queue busy: straight to the cloud, Nano not called, digit-free note", async () => {
+    const e = { ...mk(() => later(1, "Nano."), () => later(2, "Cloud here.")), headStartMs: 5000, onDeviceBusy: () => true };
+    const r = await chatReply([], said, ctx(), e);
+    expect(r).toMatchObject({ kind: "reply", source: "cloud" });
+    expect(e.onDevice).not.toHaveBeenCalled();
+    if (r.kind === "reply") expect(r.skipped).toEqual(["on-device: still busy with the last answer"]);
+  });
+  it("rate guard exhausted: no cloud call, waits for Nano", async () => {
+    const e = { ...mk(() => later(40, "Nano late."), () => later(1, "Cloud.")), headStartMs: 5 };
+    const r = await chatReply([], said, ctx({ rate: { take: () => false } }), e);
+    expect(r).toMatchObject({ kind: "reply", source: "on_device" });
+    expect(e.cloud).not.toHaveBeenCalled();
+  });
+  it("the tripwire blocks before any call", async () => {
+    const e = { ...mk(() => later(1, "x"), () => later(1, "x")), headStartMs: 1 };
+    const r = await chatReply([], "my pin is 4826", ctx(), e);
+    expect(r.kind).toBe("secret_spoken");
+    expect(e.onDevice).not.toHaveBeenCalled();
+    expect(e.cloud).not.toHaveBeenCalled();
+  });
+});
