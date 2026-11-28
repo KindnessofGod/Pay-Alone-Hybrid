@@ -53,6 +53,12 @@ describe("fitScale", () => {
     expect(fitScale({ w: 410, h: 5000 }, { w: 820, h: 1180 })).toBeCloseTo(0.5, 5);
     expect(fitScale({ w: 5000, h: 5000 }, { w: 820, h: 1180 })).toBe(1);
   });
+  it("fits the landscape iPad (1180x820 screen, 1216x856 with bezel) to the left half", () => {
+    expect(fitScale({ w: 608, h: 2000 }, { w: 1216, h: 856 })).toBeCloseTo(0.5, 5);
+    expect(fitScale({ w: 2000, h: 428 }, { w: 1216, h: 856 })).toBeCloseTo(0.5, 5);
+    expect(fitScale({ w: 880, h: 750 }, { w: 1216, h: 856 })).toBeCloseTo(880 / 1216, 5);
+    expect(fitScale({ w: 880, h: Infinity }, { w: 1216, h: 856 })).toBeCloseTo(880 / 1216, 5);
+  });
   it("is a small positive number for zero or negative space", () => {
     expect(fitScale({ w: 0, h: 0 }, { w: 820, h: 1180 })).toBeGreaterThan(0);
     expect(fitScale({ w: -5, h: 100 }, { w: 820, h: 1180 })).toBeGreaterThan(0);

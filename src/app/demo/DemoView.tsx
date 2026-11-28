@@ -7,7 +7,7 @@ import { useSearchParams } from "next/navigation";
 import { addPaid, fitScale, formatNairaMinor, parseDemoMessage } from "@/lib/ui/demoframes";
 import "./demo.css";
 
-const IPAD = { w: 856, h: 1216 };
+const IPAD = { w: 1216, h: 856 }; // landscape: 1180x820 screen plus an 18px bezel
 const PHONE = { w: 422, h: 894 };
 const FLIGHT_MS = 1200;
 
@@ -157,7 +157,7 @@ export default function DemoView() {
               <div className="dm-dev dm-ipad">
                 <span className="dm-btn t" aria-hidden="true" />
                 <div className="dm-scr" ref={ipadScreen}>
-                  <iframe key={`c${gen}`} ref={customerFrame} src={srcCustomer} title="Customer app on an iPad" width={820} height={1180} allow="microphone; publickey-credentials-get *; publickey-credentials-create *" onLoad={onLoad} />
+                  <iframe key={`c${gen}`} ref={customerFrame} src={srcCustomer} title="Customer app on an iPad (landscape)" width={1180} height={820} allow="microphone; publickey-credentials-get *; publickey-credentials-create *" onLoad={onLoad} />
                 </div>
               </div>
             </Fit>
