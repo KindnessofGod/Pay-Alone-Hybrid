@@ -2,7 +2,11 @@
 // Screenshot-only page with FIXED SAMPLE DATA. It never calls the wallet, Firebase or an AI.
 // It does not exist in production builds.
 import { notFound } from "next/navigation";
-import { Bubble, Chip, Dock, FingerprintIcon, Header, ListeningBubble, PayCard, PinStopped, PrivacyCard, ReceiptCard, ReceiptRow, SpeechConsent, WalletCard } from "../ui";
+import { Bubble, Chip, Dock, FingerprintIcon, Header, ListeningBubble, PayCard, PayCodeView, PinStopped, PrivacyCard, ReceiptCard, ReceiptRow, RequestCard, SpeechConsent, WalletCard } from "../ui";
+import { ShopForm, ShopShell, ShopStatus } from "../shop/ShopView";
+import { shopStatusView } from "@/lib/ui/requestprompt";
+
+const SAMPLE = { value: "200000", assetCode: "NGN", assetScale: 2 };
 
 function Frame({ title, nano, children, hint, listening = false }: { title: string; nano: string; children: React.ReactNode; hint: string; listening?: boolean }) {
   return (
@@ -168,6 +172,61 @@ export default function DesignPreview() {
           </ol>
         </div>
       </Frame>
+
+      <p className="preview-h" id="seller-1">R1. Wide: a shop is asking this person to pay</p>
+      <Desk
+        title="Wide shop request"
+        nano="available"
+        hint="Listening…"
+        listening
+        turns={<ol className="chat" aria-label="Conversation" />}
+        empty
+        side={<>
+          <RequestCard shopName="Mama Put" amount="₦2,000.00" reference="31" note="Rice and stew" />
+          <PayCodeView code="472913" onSay={() => undefined} />
+          <Receipts />
+          <PrivacyCard facts={FACTS} />
+        </>}
+      />
+
+      <p className="preview-h" id="seller-2">R2. Wide: paid receipt for a shop</p>
+      <Desk
+        title="Wide shop receipt"
+        nano="available"
+        hint="Tap and speak"
+        empty
+        side={<>
+          <ReceiptCard amount="₦2,000.00" to="Mama Put" reference="31" how="Approved with fingerprint · 1:05 PM · saved by the server" simulated onRead={() => undefined} />
+          <PayCodeView code="472913" onSay={() => undefined} />
+          <PrivacyCard facts={FACTS} />
+        </>}
+      />
+
+      <p className="preview-h" id="seller-3">R3. Phone: request in the chat, and the pay code</p>
+      <Frame title="Shop request" nano="available" hint="Say yes to check it, or no to decline">
+        <div className="panel-body">
+          <RequestCard shopName="Mama Put" amount="₦2,000.00" reference="31" note="Rice and stew" />
+        </div>
+      </Frame>
+      <Frame title="Pay code" nano="available" hint="Tap and speak">
+        <div className="panel-body">
+          <PayCodeView code="472913" onSay={() => undefined} />
+          <Receipts />
+        </div>
+      </Frame>
+
+      <p className="preview-h" id="shop-1">SH1. Shop page: form</p>
+      <section aria-label="Shop form" className="shop-frame"><ShopShell><ShopForm shopName="Mama Put" code="47 29 13" amount="2,000" note="Rice and stew" /></ShopShell></section>
+      <p className="preview-h" id="shop-2">SH2. Shop page: error</p>
+      <section aria-label="Shop error" className="shop-frame"><ShopShell><ShopForm shopName="Mama Put" code="12 34 56" amount="2,000" note="" error="No customer has that pay code. Check the digits." /></ShopShell></section>
+      <p className="preview-h" id="shop-3">SH3. Shop page: waiting</p>
+      <section aria-label="Shop waiting" className="shop-frame"><ShopShell><ShopStatus {...shopStatusView("pending", "31", SAMPLE)} shop="Mama Put" /></ShopShell></section>
+      <p className="preview-h" id="shop-4">SH4. Shop page: paid</p>
+      <section aria-label="Shop paid" className="shop-frame"><ShopShell><ShopStatus {...shopStatusView("paid", "31", SAMPLE)} shop="Mama Put" /></ShopShell></section>
+      <p className="preview-h" id="shop-5">SH5. Shop page: declined</p>
+      <section aria-label="Shop declined" className="shop-frame"><ShopShell><ShopStatus {...shopStatusView("declined", "31", SAMPLE)} shop="Mama Put" /></ShopShell></section>
+      <p className="preview-h" id="shop-6">SH6. Shop page: expired</p>
+      <section aria-label="Shop expired" className="shop-frame"><ShopShell><ShopStatus {...shopStatusView("expired", "31", SAMPLE)} shop="Mama Put" /></ShopShell></section>
 
       <p className="preview-h">1. Start screen</p>
       <Frame title="Start screen" nano="checking" hint="Tap to start talking">

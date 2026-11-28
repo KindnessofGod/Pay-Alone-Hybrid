@@ -16,6 +16,7 @@ export interface ReceiptRow {
   method: "pin" | "passkey";
   simulated: boolean;
   createdAt: string;
+  ref?: string; // a shop payment's 2-digit reference
 }
 export type EventRow = Omit<AuditRecord, "userId">;
 export interface History {
@@ -35,7 +36,7 @@ export async function loadHistory(store: Store, userId: string): Promise<History
   }
   const receipts = rs
     .filter((r) => r.userId === userId)
-    .map((r) => ({ id: r.id, payeeName: r.payeeName, debit: r.debit, method: r.method, simulated: r.simulated, createdAt: r.createdAt }));
+    .map((r) => ({ id: r.id, payeeName: r.payeeName, debit: r.debit, method: r.method, simulated: r.simulated, createdAt: r.createdAt, ...(r.ref ? { ref: r.ref } : {}) }));
   const events = (await recentAudit(store, userId, HISTORY_EVENTS)).map(({ userId: _u, ...rest }) => rest);
   return { ok: true, receipts, events };
 }

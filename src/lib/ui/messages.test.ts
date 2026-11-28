@@ -19,3 +19,11 @@ describe("what the app says after an approval try", () => {
     expect(approvalMessage({ ok: false, reason: "no_pending" })).toContain("Nothing was changed");
   });
 });
+
+describe("shop request messages", () => {
+  it("each request refusal has its own plain sentence", () => {
+    for (const reason of ["request_gone", "request_expired", "request_closed"]) {
+      expect(approvalMessage({ ok: false, reason })).not.toMatch(/Something went wrong/);
+    }
+  });
+});

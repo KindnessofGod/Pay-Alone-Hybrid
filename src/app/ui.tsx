@@ -3,6 +3,7 @@
 import { useEffect, type ReactNode, type Ref } from "react";
 import { reportEvent } from "@/lib/firebase/client";
 import { aiPill, sourceChip } from "@/lib/ui/status";
+import { formatPayCode, requestReceiptLine } from "@/lib/ui/requestprompt";
 
 export function FingerprintIcon({ color = "#ffffff" }: { color?: string }) {
   return (
@@ -155,25 +156,60 @@ export function PayCard({ children, label = "Please check this payment" }: { chi
   );
 }
 
+/** A shop is asking this person to pay. Amount, shop name and reference come from the server's request. */
+export function RequestCard({ shopName, amount, reference, note, onCheck, onDecline, busy = false }: { shopName: string; amount: string; reference: string; note?: string; onCheck?: () => void; onDecline?: () => void; busy?: boolean }) {
+  return (
+    <section className="pay request" aria-label="Payment request from a shop">
+      <p className="label">A shop is asking you to pay</p>
+      <p className="amt">{amount}</p>
+      <p className="to">{shopName}</p>
+      <div className="meta">
+        <span>Reference <b className="ref">{reference}</b></span>
+        {note && <span>For: {note}</span>}
+      </div>
+      <p className="note">Say yes to check it, or no to decline. Nothing is paid until you approve.</p>
+      <div className="stack">
+        <button type="button" className="btn primary" onClick={onCheck} disabled={busy}>Check and pay</button>
+        <button type="button" className="btn quiet" onClick={onDecline} disabled={busy}>Decline</button>
+      </div>
+    </section>
+  );
+}
+
+/** The person's pay code. Not secret and not a PIN: it only lets a shop ask. */
+export function PayCodeView({ code, onSay }: { code: string | null; onSay?: () => void }) {
+  return (
+    <section className="card paycode" aria-labelledby="paycode-h">
+      <h2 id="paycode-h" className="h3">Your pay code</h2>
+      <p className="code" aria-label={code ? `Your pay code: ${formatPayCode(code)}` : "Pay code loading"}>{code ? formatPayCode(code) : "…"}</p>
+      <p className="note">A pay code, not your PIN. A shop types it to ask you for a payment. You still approve every payment yourself.</p>
+      <button type="button" className="btn ghost small" onClick={onSay} disabled={!code}><span aria-hidden="true">🔊</span> Say my pay code</button>
+    </section>
+  );
+}
+
 export function ReceiptCard({
   amount,
   to,
   how,
   simulated,
   onRead,
+  reference,
 }: {
   amount: string;
   to: string;
   how?: string;
   simulated: boolean;
   onRead?: () => void;
+  /** A shop payment's 2-digit reference. */
+  reference?: string;
 }) {
   return (
     <section className="done" aria-label="Receipt">
       <div className="check" aria-hidden="true">✓</div>
-      <p className="paid">Paid</p>
+      <p className="paid">{reference ? requestReceiptLine(to, reference) : "Paid"}</p>
       <p className="amt">{amount}</p>
-      <p className="to">to {to}</p>
+      {!reference && <p className="to">to {to}</p>}
       {how && <p className="sub">{how}</p>}
       <span className={`badge ${simulated ? "sim" : ""}`}>{simulated ? "SIMULATED: no real money moved" : "REAL TEST-WALLET PAYMENT"}</span>
       {onRead && (

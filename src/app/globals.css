@@ -185,3 +185,30 @@ code{background:var(--bg);border:1px solid var(--line);padding:2px 6px;border-ra
 .desk .convo.empty .examples{gap:8px}
 .desk .convo.empty .example{font-size:15px;padding:10px 14px}
 .desk .hist .history>div:has(>.btn){display:flex;gap:0 18px;flex-wrap:wrap;align-items:center}
+
+/* Seller flow: the customer's request card, the pay code card, and the shop page. */
+.request .ref,.shopstatus .ref{font-weight:800;color:var(--ink)}
+.request .meta{flex-wrap:wrap}
+.request .note{margin:0 0 4px}
+.paycode .code{font-family:var(--font-serif),Georgia,serif;font-size:44px;letter-spacing:.04em;line-height:1.05;font-variant-numeric:tabular-nums}
+.paycode .h3{padding:0}
+.desk .paycode .btn.small{width:auto;min-height:44px;padding:0;background:none;border:0;box-shadow:none;font-size:15px;font-weight:600;color:var(--brand-strong);text-decoration:underline;text-underline-offset:3px;justify-content:flex-start}
+.shop{max-width:560px;min-height:100dvh;margin:0 auto;padding:0 16px 40px;display:flex;flex-direction:column;gap:12px}
+.shop>header{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:16px 0 8px}
+.shop main{display:flex;flex-direction:column;gap:12px}
+.shopform label{font-size:16px;font-weight:600;color:var(--ink-2);margin-bottom:-6px}
+.shopform h2{margin-bottom:2px}
+.field{display:block;width:100%;min-height:56px;font:inherit;font-size:19px;padding:10px 14px;border-radius:14px;border:2px solid var(--line-strong);background:var(--paper);color:var(--ink)}
+.field.big{min-height:68px;font-size:30px;font-variant-numeric:tabular-nums;letter-spacing:.04em}
+.field:focus{border-color:var(--brand)}
+.shoperr{background:var(--bad-soft);border:2px solid var(--bad);color:#7d1f17;font-weight:700;border-radius:14px;padding:10px 14px;font-size:17px}
+.shopstatus{text-align:center;align-items:center;padding:28px 20px;gap:10px}
+.shopstatus .label{color:var(--ink-2);font-size:17px;font-weight:600}
+.shopstatus .headline{font-family:var(--font-serif),Georgia,serif;font-size:48px;line-height:1.08;letter-spacing:-.02em;overflow-wrap:anywhere}
+.shopstatus .sicon{font-family:var(--font-sans),sans-serif;font-weight:800}
+.shopstatus .sub{font-size:22px;font-weight:600;margin-top:8px}
+.shopstatus.s-wait{background:var(--wait-soft);border-color:#d9c985;color:var(--wait)}
+.shopstatus.s-good{background:var(--good-soft);border:2px solid var(--good);color:var(--brand-strong)}
+.shopstatus.s-bad{background:var(--bad-soft);border:2px solid var(--bad);color:#7d1f17}
+.shopstatus .btn{margin-top:14px}
+@media (min-width:1024px){.shop{max-width:640px;padding-top:24px}.shopstatus .headline{font-size:64px}}

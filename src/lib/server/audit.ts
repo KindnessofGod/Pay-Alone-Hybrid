@@ -25,6 +25,8 @@ const FIELDS: Record<string, Check> = {
   code: word,
   ms: (v) => typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= 3_600_000,
   requestId: (v) => typeof v === "string" && /^req_[A-Za-z0-9_-]{4,40}$/.test(v),
+  // A shop's payment request (seller.ts): the id only, never the shop name, amount or pay code.
+  shopRequestId: (v) => typeof v === "string" && /^sr_[A-Za-z0-9_-]{4,40}$/.test(v),
   // Browser step log (clientaudit.ts): enums, booleans and small integers only. Letters only for sid, so it
   // can never look like a PIN.
   sid: (v) => typeof v === "string" && /^[a-z]{8}$/.test(v),
@@ -53,7 +55,7 @@ const STORED_ONLY: Record<string, Check> = {
   amountMinor: (v) => typeof v === "string" && /^\d{1,15}$/.test(v),
 };
 
-export type AuditFields = { outcome?: string; reason?: string; receiptId?: string; method?: "pin" | "passkey"; asset?: string; simulated?: boolean; source?: "on_device" | "cloud" | "rules" | "none"; guarded?: boolean; voice?: "natural" | "browser"; code?: string; ms?: number; requestId?: string; amountMinor?: string;
+export type AuditFields = { outcome?: string; reason?: string; receiptId?: string; method?: "pin" | "passkey"; asset?: string; simulated?: boolean; source?: "on_device" | "cloud" | "rules" | "none"; guarded?: boolean; voice?: "natural" | "browser"; code?: string; ms?: number; requestId?: string; shopRequestId?: string; amountMinor?: string;
   sid?: string; t?: number; state?: string; speech?: string; mode?: string; chars?: number; choice?: string; index?: number; kind?: string; cloud_raced?: boolean; engine?: string; ok?: boolean;
   method_offered?: string; action?: string; shown?: boolean; tab?: string; count?: number; where?: string; stage?: string; close_code?: number;
 };

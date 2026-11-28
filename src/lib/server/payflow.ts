@@ -16,6 +16,7 @@ import { approvePayment, type ChallengeStore } from "../security/approve";
 import { checkPin, setPin, type PinStore } from "../security/pin";
 import { audit, type AuditFields } from "./audit";
 import { saveCounter } from "./passkeystore";
+import { claimForPayment, markPaid, payableRequest, releaseClaim, type SellerDeps } from "./seller";
 
 export interface Contact {
   id: string;
@@ -47,6 +48,9 @@ interface Pending {
   payee: Contact;
   quote: QuoteResult;
   createdAt: number;
+  /** Set when this payment answers a shop's request (seller.ts): the amount and payee came from that request. */
+  shopRequestId?: string;
+  ref?: string;
 }
 
 export interface Receipt {
@@ -60,10 +64,15 @@ export interface Receipt {
   method: "pin" | "passkey";
   simulated: boolean;
   createdAt: string;
+  /** Only for a payment to a shop's request: the 2-digit reference both sides saw, and the request id. */
+  ref?: string;
+  shopRequestId?: string;
 }
 
 /** A pending payment older than this cannot be approved; the person starts again. */
 export const PENDING_TTL_MS = 10 * 60_000;
+
+const sellerDeps = (d: PayDeps): SellerDeps => ({ store: d.store, limitMinor: d.limitMinor, now: d.now });
 
 const pendingKey = (userId: string, requestId: string) => `${userId}|${requestId}`;
 
@@ -91,16 +100,27 @@ async function newChallenge(d: PayDeps, p: Pending): Promise<string> {
 async function startInner(
   d: PayDeps,
   userId: string,
-  body: { payeeId?: unknown; amountMinor?: unknown },
+  body: { payeeId?: unknown; amountMinor?: unknown; shopRequestId?: unknown },
 ): Promise<
-  | { ok: true; requestId: string; challenge: string; readBack: string; debit: Amount; payeeName: string; simulated: boolean; hasPasskey: boolean }
-  | { ok: false; reason: "no_pin_set" | "wallet_not_connected" | "unknown_payee" | "bad_amount" | "over_limit" | "quote_failed" }
+  | { ok: true; requestId: string; challenge: string; readBack: string; debit: Amount; payeeName: string; simulated: boolean; hasPasskey: boolean; ref?: string }
+  | { ok: false; reason: "no_pin_set" | "wallet_not_connected" | "unknown_payee" | "bad_amount" | "over_limit" | "quote_failed" | "request_gone" | "request_expired" | "request_closed" }
 > {
   if (!(await pinStoreOf(d.store).get(userId))) return { ok: false, reason: "no_pin_set" };
   if (d.walletReady && !(await d.walletReady(userId))) return { ok: false, reason: "wallet_not_connected" };
-  const payee = (await d.contacts(userId)).find((c) => c.id === body.payeeId);
+  let payee: Contact | undefined;
+  let amount: unknown = body.amountMinor;
+  let shop: { id: string; ref: string } | undefined;
+  if (body.shopRequestId !== undefined) {
+    // A shop's request: the server takes the payee and the amount from the request. Whatever the browser sent is ignored.
+    const pr = await payableRequest(sellerDeps(d), userId, body.shopRequestId);
+    if (!pr.ok) return pr;
+    payee = { id: `shop_${pr.request.id}`, name: pr.request.shopName };
+    amount = pr.request.amountMinor;
+    shop = { id: pr.request.id, ref: pr.request.ref };
+  } else {
+    payee = (await d.contacts(userId)).find((c) => c.id === body.payeeId);
+  }
   if (!payee) return { ok: false, reason: "unknown_payee" };
-  const amount = body.amountMinor;
   if (typeof amount !== "string" || !/^\d{1,15}$/.test(amount) || BigInt(amount) <= 0n) return { ok: false, reason: "bad_amount" };
   if (BigInt(amount) > BigInt(d.limitMinor)) return { ok: false, reason: "over_limit" };
 
@@ -111,7 +131,7 @@ async function startInner(
     if (e instanceof OpError) return { ok: false, reason: "quote_failed" };
     throw e;
   }
-  const pending: Pending = { userId, requestId: `req_${randomToken(12)}`, payee, quote, createdAt: d.now?.() ?? Date.now() };
+  const pending: Pending = { userId, requestId: `req_${randomToken(12)}`, payee, quote, createdAt: d.now?.() ?? Date.now(), ...(shop ? { shopRequestId: shop.id, ref: shop.ref } : {}) };
   await d.store.put("pending", pendingKey(userId, pending.requestId), pending);
   return {
     ok: true,
@@ -122,6 +142,7 @@ async function startInner(
     payeeName: payee.name,
     simulated: quote.simulated,
     hasPasskey: ((await d.passkeys?.(userId)) ?? []).length > 0,
+    ...(shop ? { ref: shop.ref } : {}),
   };
 }
 
@@ -165,11 +186,17 @@ async function finishInner(
   // Take the pending payment so it can be paid only once.
   const mine = await d.store.take<Pending>("pending", key);
   if (!mine) return { ok: false, reason: "not_found" };
+  // A shop's request is taken for this one payment first, so it cannot be paid twice or after it ended.
+  if (mine.shopRequestId) {
+    const c = await claimForPayment(sellerDeps(d), userId, mine.shopRequestId, mine.requestId);
+    if (!c.ok) return { ok: false, reason: c.reason };
+  }
   let paid: { paymentId: string; simulated: boolean };
   try {
     paid = await d.pay(userId, mine.quote.quoteId);
   } catch (e) {
     // The wallet said no (or did not answer). Nothing is recorded as sent. Error text is never returned.
+    if (mine.shopRequestId) await releaseClaim(sellerDeps(d), mine.shopRequestId, mine.requestId).catch(() => undefined);
     if (e instanceof OpError) return { ok: false, reason: e.kind === "limit_exceeded" ? "over_cap" : "payment_failed" };
     throw e;
   }
@@ -184,11 +211,14 @@ async function finishInner(
     method: a.method,
     simulated: paid.simulated || mine.quote.simulated,
     createdAt: new Date(d.now?.() ?? Date.now()).toISOString(),
+    ...(mine.shopRequestId ? { ref: mine.ref, shopRequestId: mine.shopRequestId } : {}),
   };
   await d.store.put("receipts", receipt.id, receipt);
   // The person's own list, found by user id and time. Best effort: the money has moved, so a failure here must not hide the receipt.
   await d.store.put("receipts_by_user", `${userId}|${String(Date.parse(receipt.createdAt)).padStart(13, "0")}|${receipt.id}`, receipt).catch(() => undefined);
-  const what = `${speakPlain(receipt.debit)} to ${receipt.payeeName}. Receipt saved.`;
+  // Money has moved: the request is marked paid in this same server step. A failure here must not hide the receipt.
+  if (mine.shopRequestId) await markPaid(sellerDeps(d), userId, mine.shopRequestId, mine.requestId).catch(() => undefined);
+  const what = mine.shopRequestId ? `Paid ${receipt.payeeName}, reference ${mine.ref}. ${speakPlain(receipt.debit)}. Receipt saved.` : `${speakPlain(receipt.debit)} to ${receipt.payeeName}. Receipt saved.`;
   return { ok: true, receipt, spoken: receipt.simulated ? `Simulated payment, no real money moved. ${what}` : `Sent. ${what}` };
 }
 
@@ -236,7 +266,7 @@ async function audited<R>(d: PayDeps, userId: string, event: string, t0: number,
   return r;
 }
 
-export function startPayment(d: PayDeps, userId: string, body: { payeeId?: unknown; amountMinor?: unknown }) {
+export function startPayment(d: PayDeps, userId: string, body: { payeeId?: unknown; amountMinor?: unknown; shopRequestId?: unknown }) {
   return audited(d, userId, "pay_start", Date.now(), () => startInner(d, userId, body), (r) =>
     r.ok ? { outcome: "ok", requestId: r.requestId, simulated: r.simulated, asset: r.debit.assetCode, amountMinor: r.debit.value } : failFields(r.reason),
   );

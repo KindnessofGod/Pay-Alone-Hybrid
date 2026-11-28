@@ -18,6 +18,9 @@ const FIXED: Record<string, string> = {
   over_cap: "That is more than the weekly limit you set in your wallet. Nothing was sent.",
   quote_failed: "The wallet could not price this payment. Nothing was sent. Please try again.",
   payment_failed: "The wallet could not send it. Nothing was sent. Please try again.",
+  request_gone: "That payment request is no longer there. Nothing was sent.",
+  request_expired: "That payment request has run out of time. Nothing was sent. Ask the shop to send it again.",
+  request_closed: "That payment request is already finished. Nothing was sent.",
   signed_out: "You are signed out. Please reload the page. Nothing was sent.",
 };
 

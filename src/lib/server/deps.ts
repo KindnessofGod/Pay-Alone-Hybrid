@@ -8,6 +8,7 @@ import type { Verify, VerifyAppCheck } from "./http";
 import type { PayDeps } from "./payflow";
 import { appOrigin } from "./origin";
 import { opPayDeps } from "./opdeps";
+import type { SellerDeps } from "./seller";
 import { storedPasskeys } from "./passkeystore";
 import { verifyAppCheckToken, verifyFirebaseIdToken } from "./tokens";
 
@@ -60,3 +61,5 @@ export function payDeps(req: Request): PayDeps {
     }),
   };
 }
+
+export const sellerDeps = (): SellerDeps => ({ store: getStore(), limitMinor: Number(process.env.VOICE_LIMIT_MINOR ?? 5_000_000) });

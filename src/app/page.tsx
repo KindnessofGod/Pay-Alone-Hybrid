@@ -17,11 +17,14 @@ import { chatReply, type ChatTurn } from "@/lib/hybrid/chat";
 import { afterPayment, chatOnly, initialDialog, next as dialogNext, silence, type DialogState } from "@/lib/hybrid/dialog";
 import { spokenSecret } from "@/lib/hybrid/tripwire";
 import Approve from "./Approve";
-import { Bubble, Chip, Dock, Header, ListeningBubble, PinStopped, PrivacyCard, SPEECH_CONSENT_TEXT, SpeechConsent, WalletCard, type Tab } from "./ui";
+import { Bubble, Chip, Dock, Header, ListeningBubble, PinStopped, PrivacyCard, RequestCard, SPEECH_CONSENT_TEXT, SpeechConsent, WalletCard, type Tab } from "./ui";
 import History from "./History";
 import { takeResume, type Resume } from "@/lib/ui/resume";
 import { liveEnabled } from "@/lib/hybrid/live";
 import { useLive } from "./useLive";
+import PayCode from "./PayCode";
+import { answerToRequest, requestPrompt } from "@/lib/ui/requestprompt";
+import { bigAmount } from "@/lib/ui/amountview";
 
 // SIMULATED test contacts until the saved-contacts screen exists (the server checks the same list).
 const CONTACTS: Contact[] = DEMO_CONTACTS.map((c) => ({ ...c }));
@@ -40,6 +43,10 @@ function useWide() {
     () => false,
   );
 }
+
+/** A shop's payment request as the server sends it (seller.ts PendingView). */
+type ShopReq = { id: string; ref: string; shopName: string; note?: string; amountMinor: string; assetCode: "NGN"; assetScale: 2 };
+const REQUEST_POLL_MS = 4000;
 
 export default function Home() {
   const wide = useWide();
@@ -60,7 +67,9 @@ export default function Home() {
   const [typed, setTyped] = useState("");
   const [result, setResult] = useState<Understood | null>(null);
   const [ms, setMs] = useState(0);
-  const [approving, setApproving] = useState<{ payeeId: string; amountMinor: string; key: number } | null>(null);
+  const [approving, setApproving] = useState<{ payeeId: string; amountMinor: string; key: number; shopRequestId?: string; reference?: string } | null>(null);
+  const [incoming, setIncoming] = useState<ShopReq | null>(null); // a shop is asking this person to pay
+  const [requestBusy, setRequestBusy] = useState(false);
   const [working, setWorking] = useState("");
   const [voice, setVoice] = useState<TtsStatus>("off");
   const [historyKey, setHistoryKey] = useState(0); // bumps after a payment so the receipts reload
@@ -420,6 +429,112 @@ export default function Home() {
   );
   talkRef.current = talk;
 
+  // ---- A shop asks, this person approves (seller.ts). Polled, because there are no webhooks. ----
+  const approvingRef = useRef<typeof approving>(null);
+  approvingRef.current = approving;
+  const incomingRef = useRef<ShopReq | null>(null);
+  incomingRef.current = incoming;
+  const announced = useRef(new Set<string>()); // requests already spoken this page load
+  const dismissed = useRef(new Set<string>()); // requests this person declined
+  const readyRef = useRef(false);
+  readyRef.current = ready;
+  const micRef = useRef(false);
+  micRef.current = speechMode(speech === "checking" ? "none" : speech, cloudSpeech).mic;
+  const localRef = useRef(false);
+  localRef.current = speechMode(speech === "checking" ? "none" : speech, cloudSpeech).local;
+
+  const checkRequest = useCallback((rq: ShopReq) => {
+    stopListening();
+    setIncoming(null);
+    seq.current++;
+    setApproving({ payeeId: "", amountMinor: rq.amountMinor, shopRequestId: rq.id, reference: rq.ref, key: Date.now() });
+  }, []);
+
+  const declineRequest = useCallback(
+    async (rq: ShopReq) => {
+      stopListening();
+      dismissed.current.add(rq.id);
+      setIncoming((cur) => (cur?.id === rq.id ? null : cur));
+      setRequestBusy(true);
+      let done = false;
+      try {
+        done = (await api("/api/requests/decline", { id: rq.id })).ok;
+      } catch {
+        done = false;
+      }
+      setRequestBusy(false);
+      await speak(done ? "Declined. Nothing was sent." : "I could not decline it. It will run out by itself in a few minutes. Nothing was sent.").catch(() => undefined);
+    },
+    [speak],
+  );
+
+  /** Speaks the template, then (voice only, never typed) listens once for yes or no. A yes only opens the usual check. */
+  const announceRequest = useCallback(
+    async (rq: ShopReq) => {
+      await speak(requestPrompt(rq.shopName, { value: rq.amountMinor, assetCode: rq.assetCode, assetScale: rq.assetScale }, rq.ref)).catch(() => undefined);
+      if (!readyRef.current || !micRef.current || busy.current || approvingRef.current || incomingRef.current?.id !== rq.id) return;
+      busy.current = true;
+      setListening(true);
+      let said = "";
+      try {
+        said = await listenOnce({ local: localRef.current, onInterim: setLiveWords });
+      } catch {
+        said = "";
+      } finally {
+        busy.current = false;
+        setListening(false);
+        setLiveWords("");
+      }
+      if (incomingRef.current?.id !== rq.id || approvingRef.current) return;
+      const a = answerToRequest(said);
+      if (a === "check") checkRequest(rq);
+      else if (a === "decline") await declineRequest(rq);
+      else if (a === "secret") await speak("Stop. Never say your PIN out loud. Type it on the keys.").catch(() => undefined);
+    },
+    [speak, checkRequest, declineRequest],
+  );
+
+  useEffect(() => {
+    if (!firebaseConfigured()) return;
+    let off = false;
+    let running = false;
+    const poll = async () => {
+      if (running || off || document.visibilityState === "hidden") return;
+      running = true;
+      try {
+        const r = await api<{ requests: ShopReq[] }>("/api/requests/pending", {});
+        if (off || !r.ok || !Array.isArray(r.requests)) return;
+        const open = r.requests.filter((x) => !dismissed.current.has(x.id));
+        const busyWith = approvingRef.current?.shopRequestId;
+        const next = open.find((x) => x.id !== busyWith);
+        setIncoming((cur) => {
+          if (cur && open.some((x) => x.id === cur.id)) return cur;
+          return next ?? null;
+        });
+        if (next && !busyWith && !announced.current.has(next.id)) {
+          announced.current.add(next.id);
+          setTab("talk");
+          void announceRequest(next);
+        }
+      } catch {
+        /* the next poll tries again */
+      } finally {
+        running = false;
+      }
+    };
+    void poll();
+    const t = setInterval(() => void poll(), REQUEST_POLL_MS);
+    const wake = () => void poll();
+    window.addEventListener("focus", wake);
+    document.addEventListener("visibilitychange", wake);
+    return () => {
+      off = true;
+      clearInterval(t);
+      window.removeEventListener("focus", wake);
+      document.removeEventListener("visibilitychange", wake);
+    };
+  }, [announceRequest]);
+
   // Start App Check (reCAPTCHA) on page load, so a payment call right away already has its token.
   useEffect(() => {
     if (firebaseConfigured()) firebaseApp();
@@ -537,6 +652,8 @@ export default function Home() {
               key={approving.key}
               payeeId={approving.payeeId}
               amountMinor={approving.amountMinor}
+              shopRequestId={approving.shopRequestId}
+              reference={approving.reference}
               speak={speak}
               onPaid={() => setHistoryKey((k) => k + 1)}
               listen={(() => {
@@ -558,6 +675,18 @@ export default function Home() {
               }}
             />
   ) : null;
+  const requestEl =
+    incoming && !approving ? (
+      <RequestCard
+        shopName={incoming.shopName}
+        amount={bigAmount({ value: incoming.amountMinor, assetCode: incoming.assetCode, assetScale: incoming.assetScale })}
+        reference={incoming.ref}
+        note={incoming.note}
+        busy={requestBusy}
+        onCheck={() => checkRequest(incoming)}
+        onDecline={() => void declineRequest(incoming)}
+      />
+    ) : null;
   const welcomeEl =
     quiet ? (
           <section className="welcome" aria-label="Welcome">
@@ -677,6 +806,7 @@ export default function Home() {
               {listening && <ListeningBubble words={liveWords} />}
             </ol>
           )}
+          {!wide && requestEl}
           {!wide && approveEl}
     </div>
   );
@@ -713,7 +843,9 @@ export default function Home() {
                 {resumeBtn}
               </div>
             )}
+            {requestEl}
             {approveEl}
+            <PayCode speak={speak} />
             <div className="card hist"><History refreshKey={historyKey} speak={speak} /></div>
             <PrivacyCard facts={privacyFacts} />
           </aside>
@@ -732,6 +864,7 @@ export default function Home() {
         {checkboxEl}
       </div>
       <div className="panel-body" role="tabpanel" id="panel-receipts" aria-labelledby="tab-receipts" hidden={tab !== "receipts"}>
+        <PayCode speak={speak} />
         <History refreshKey={historyKey} speak={speak} />
       </div>
       <div className="panel-body" role="tabpanel" id="panel-privacy" aria-labelledby="tab-privacy" hidden={tab !== "privacy"}>

@@ -18,6 +18,9 @@ type Phase = "connect" | "starting" | "set_pin" | "confirm_pin" | "pin" | "offer
 interface Props {
   payeeId: string;
   amountMinor: string;
+  /** Paying a shop's request: the server takes the payee and the amount from this request, not from the browser. */
+  shopRequestId?: string;
+  reference?: string;
   speak(text: string): Promise<void>;
   listen: (() => Promise<string>) | null; // null when the mic is off for privacy
   /** "paid" after a receipt; "stopped" after a cancel, a stop or Not now. */
@@ -32,6 +35,7 @@ interface Receipt {
   debit: { value: string; assetCode: string; assetScale: number };
   simulated: boolean;
   createdAt: string;
+  ref?: string;
 }
 
 function alreadyDeclined(): boolean {
@@ -42,7 +46,7 @@ function alreadyDeclined(): boolean {
   }
 }
 
-export default function Approve({ payeeId, amountMinor, speak, listen, onClose, onPaid }: Props) {
+export default function Approve({ payeeId, amountMinor, shopRequestId, reference, speak, listen, onClose, onPaid }: Props) {
   const [phase, setPhase] = useState<Phase>("starting");
   const [pin, setPin] = useState("");
   const [firstPin, setFirstPin] = useState("");
@@ -78,7 +82,7 @@ export default function Approve({ payeeId, amountMinor, speak, listen, onClose, 
   };
 
   async function begin() {
-    const r = await call<{ requestId: string; challenge: string; readBack: string; hasPasskey?: boolean; debit?: unknown; payeeName?: unknown }>("/api/pay/start", { payeeId, amountMinor });
+    const r = await call<{ requestId: string; challenge: string; readBack: string; hasPasskey?: boolean; debit?: unknown; payeeName?: unknown }>("/api/pay/start", shopRequestId ? { shopRequestId } : { payeeId, amountMinor });
     if (r.ok) {
       req.current = { requestId: r.requestId, challenge: r.challenge };
       if (isAmountView(r.debit) && typeof r.payeeName === "string") setQuote({ debit: r.debit, payeeName: r.payeeName, readBack: r.readBack });
@@ -107,7 +111,7 @@ export default function Approve({ payeeId, amountMinor, speak, listen, onClose, 
     const r = await call<{ redirectUrl: string }>("/api/wallet/connect", {});
     reportEvent({ event: "approve_action", action: "wallet_connect", outcome: r.ok && r.redirectUrl ? "ok" : "fail", ms: Math.round(performance.now() - tW) });
     if (r.ok && r.redirectUrl) {
-      saveResume(window.sessionStorage, { payeeId, amountMinor }); // so the person can carry on after the wallet page
+      if (!shopRequestId) saveResume(window.sessionStorage, { payeeId, amountMinor }); // a shop request stays open and comes back by itself // so the person can carry on after the wallet page
       window.location.href = r.redirectUrl;
       return;
     }
@@ -292,6 +296,7 @@ export default function Approve({ payeeId, amountMinor, speak, listen, onClose, 
           to={receipt.payeeName}
           how={`Approved with ${approvedBy} · ${new Date(receipt.createdAt).toLocaleTimeString([], { timeStyle: "short" })} · saved by the server`}
           simulated={receipt.simulated}
+          reference={receipt.ref}
           onRead={spokenReceipt ? () => void speak(spokenReceipt).catch(() => undefined) : undefined}
         />
         <p className="note" aria-live="polite">{message}</p>
@@ -324,7 +329,7 @@ export default function Approve({ payeeId, amountMinor, speak, listen, onClose, 
           <p className="to">to {quote.payeeName}</p>
           <div className="meta">
             <span>Fees included</span>
-            <span>From the wallet&apos;s quote</span>
+            {reference ? <span>Reference {reference}</span> : <span>From the wallet&apos;s quote</span>}
           </div>
         </>
       )}
