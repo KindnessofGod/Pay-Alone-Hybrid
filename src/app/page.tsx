@@ -1,7 +1,7 @@
 "use client";
 // The voice screen: header, wallet, conversation, and a sticky dock with the big mic. Everything is also
 // spoken, and works with a screen reader and with the keyboard only (Space to talk).
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { understand, type Policy, type Understood } from "@/lib/hybrid/understand";
 import type { Contact } from "@/lib/hybrid/crosscheck";
 import { nanoAvailability } from "@/lib/hybrid/device";
@@ -18,43 +18,30 @@ import { chatReply, type ChatTurn } from "@/lib/hybrid/chat";
 import { afterPayment, chatOnly, initialDialog, next as dialogNext, silence, type DialogState } from "@/lib/hybrid/dialog";
 import { spokenSecret } from "@/lib/hybrid/tripwire";
 import Approve from "./Approve";
-import { Bubble, Chip, Dock, Header, LanguagePicker, ListeningBubble, PinStopped, PrivacyCard, RequestCard, SPEECH_CONSENT_TEXT, SpeechConsent, StartLayer, WalletCard, type Tab } from "./ui";
+import { Bubble, Chip, LanguagePicker, ListeningBubble, PinStopped, PrivacyCard, RequestCard, SPEECH_CONSENT_TEXT, SpeechConsent, StartLayer } from "./ui";
+import { ActivityCard, BoardTop, PeopleCard, Rail, SafetyTiles, Sheet, SpentCard, TabBar, VoicePanel, WalletStack, type Tab } from "./dash";
+import { leftSentence, leftThisWeek, weekBars, type WalletView } from "@/lib/ui/summary";
+import { aiPill } from "@/lib/ui/status";
+import type { OrbMode } from "./GlassOrb";
 import Setup from "./Setup";
 import { amountSpoken, readLang, stringsFor, writeLang, type LangCode } from "@/lib/hybrid/languages";
 import { openingTurn, speakableForLive, startKey, APP_OPENED_AGAIN } from "@/lib/ui/voiceflow";
-import History from "./History";
+import History, { useHistory } from "./History";
 import { takeResume, type Resume } from "@/lib/ui/resume";
 import { liveEnabled } from "@/lib/hybrid/live";
 import { useLive } from "./useLive";
-import PayCode from "./PayCode";
-import { answerToRequest, requestPrompt } from "@/lib/ui/requestprompt";
+import PayCode, { usePayCode } from "./PayCode";
+import { answerToRequest, payCodeSpeech, requestPrompt } from "@/lib/ui/requestprompt";
 import { bigAmount } from "@/lib/ui/amountview";
 
 // SIMULATED test contacts until the saved-contacts screen exists (the server checks the same list).
 const CONTACTS: Contact[] = DEMO_CONTACTS.map((c) => ({ ...c }));
-
-// One layout per screen size. The wide layout (>= 1024px) puts the wallet in the header, the conversation on
-// the left, and the payment, receipts and privacy cards on the right. The phone layout is unchanged.
-const WIDE = "(min-width: 1024px)";
-function useWide() {
-  return useSyncExternalStore(
-    (cb) => {
-      const m = window.matchMedia(WIDE);
-      m.addEventListener("change", cb);
-      return () => m.removeEventListener("change", cb);
-    },
-    () => window.matchMedia(WIDE).matches,
-    () => false,
-  );
-}
 
 /** A shop's payment request as the server sends it (seller.ts PendingView). */
 type ShopReq = { id: string; ref: string; shopName: string; note?: string; amountMinor: string; assetCode: "NGN"; assetScale: 2 };
 const REQUEST_POLL_MS = 4000;
 
 export default function Home() {
-  const wide = useWide();
-  const scrollRef = useRef<HTMLDivElement>(null);
   const [ready, setReady] = useState(false);
   const [nano, setNano] = useState("checking");
   const [speech, setSpeech] = useState<SpeechStatus | "checking">("checking");
@@ -64,7 +51,10 @@ export default function Home() {
   const [listening, setListening] = useState(false);
   const [liveWords, setLiveWords] = useState(""); // interim words, shown on screen only
   const [consent, setConsent] = useState(false); // the one-tap online speech choice
-  const [tab, setTab] = useState<Tab>("talk");
+  const [tab, setTab] = useState<"home" | "talk">("home"); // phone: which panel shows (the dark rail and the voice panel are side by side on wide screens)
+  const [sheet, setSheet] = useState<null | "settings" | "history">(null);
+  const [wallet, setWallet] = useState<WalletView | null>(null); // the wallet grant: weekly limit and its week, from the server
+  const [hasPasskey, setHasPasskey] = useState<boolean | null>(null);
   const [walletConnected, setWalletConnected] = useState(false);
   type Turn = { who: "you" | "app"; text: string; ai?: "on_device" | "cloud"; sent?: string };
   const [turns, setTurns] = useState<Turn[]>([]);
@@ -552,6 +542,7 @@ export default function Home() {
         if (next && !busyWith && !announced.current.has(next.id)) {
           announced.current.add(next.id);
           setTab("talk");
+          setSheet(null);
           void announceRequest(next);
         }
       } catch {
@@ -813,7 +804,10 @@ export default function Home() {
         const m = speechMode(speech === "checking" ? "none" : speech, cloudSpeech);
         return m.mic ? () => listenOnce({ local: m.local }) : null;
       })()}
-      onClose={() => setSetupOn(false)}
+      onClose={() => {
+        setSetupOn(false);
+        setHistoryKey((k) => k + 1); // a fingerprint may have been added: ask the server again
+      }}
     />
   ) : null;
   const langEl = (
@@ -836,9 +830,10 @@ export default function Home() {
     ) : null;
   const welcomeEl =
     quiet ? (
-          <section className="welcome" aria-label="Welcome">
-            <p className="serif big">Say who you want to pay.</p>
-            <p className="note">Or ask me anything.</p>
+          <section className="welcome-chat" aria-label="Welcome">
+            <ol className="chat">
+              <li className="b ai">Hello. Ask me what is left to spend, who you paid, or tell me who to send money to.</li>
+            </ol>
             <ul className="examples" aria-label="Try one of these">
               {EXAMPLES.map((ex) => (
                 <li key={ex}>
@@ -876,11 +871,6 @@ export default function Home() {
             </button>
           )}
     </>
-  );
-  const walletEl = (compact: boolean) => (
-    <WalletCard compact={compact} note={compact ? undefined : walletNote} connected={walletConnected} onConnect={firebaseConfigured() ? () => void connectWallet() : undefined}>
-      {!compact && resumeBtn}
-    </WalletCard>
   );
   const chatEl = (
     <div aria-live="polite" className="chat">
@@ -962,9 +952,6 @@ export default function Home() {
               {listening && <ListeningBubble words={liveWords} />}
             </ol>
           )}
-          {!wide && requestEl}
-          {!wide && setupEl}
-          {!wide && approveEl}
     </div>
   );
   const privacyFacts = [
@@ -975,85 +962,122 @@ export default function Home() {
     ...(!firebaseConfigured() ? [{ label: "Firebase", value: "not configured, plain rules only" }] : []),
   ];
 
-  // Keep the newest message in view inside the conversation panel (wide layout only).
-  useEffect(() => {
-    if (wide && scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-  }, [wide, turns, working, approving, consent, liveWords]);
+  const hist = useHistory(historyKey);
+  const code = usePayCode(begun);
+  const receipts = hist.data?.receipts ?? null;
 
-  if (wide) {
-    return (
-      <>
-      {startEl}
-      <div className="app desk" inert={!begun}>
-        <Header nano={nano} liveVoice={liveUsable} right={walletEl(true)} />
-        {langEl}
-        <div className="grid">
-          <section className={`convo${quiet ? " empty" : ""}`} aria-label="Conversation">
-            <div className="scroll" ref={scrollRef}>
-              {welcomeEl}
-              {chatEl}
-              {checkboxEl}
-            </div>
-            <Dock desk hint={hint} listening={listening || live.active} micLabel={micLabel} onMic={onMic} typed={typed} onTyped={setTyped} onSubmit={() => void submitTyped()} inputRef={inputBox} tab={tab} />
-          </section>
-          <aside className="side" aria-label="Payment, receipts and privacy">
-            {(walletNote || (resume && !approving)) && (
-              <div className="card wallnote" aria-live="polite">
-                {walletNote && <p>{walletNote}</p>}
-                {resumeBtn}
-              </div>
-            )}
-            {requestEl}
-            {setupEl}
-            {approveEl}
-            <PayCode speak={speak} />
-            <div className="card hist"><History refreshKey={historyKey} speak={speak} /></div>
-            <PrivacyCard facts={privacyFacts} />
-          </aside>
-        </div>
-      </div>
-      </>
-    );
-  }
+  // The wallet's weekly limit and whether a fingerprint is saved, from the server. Asked after the first press and after each payment.
+  const refreshAccount = useCallback(async () => {
+    if (!firebaseConfigured()) return;
+    try {
+      const [w, st] = await Promise.all([
+        api<{ connected: boolean; cap: WalletView["cap"]; interval?: string }>("/api/wallet/status", {}),
+        api<{ hasPasskey: boolean }>("/api/setup/status", {}),
+      ]);
+      if (w.ok) setWallet({ connected: Boolean(w.connected), cap: w.cap ?? null, interval: w.interval });
+      if (st.ok) setHasPasskey(Boolean(st.hasPasskey));
+    } catch {
+      /* the cards then say "connect" or "shown after you start": nothing invented */
+    }
+  }, []);
+  const loadHistory = hist.load;
+  useEffect(() => {
+    if (!begun) return;
+    void refreshAccount().then(() => loadHistory(true));
+  }, [begun, historyKey, refreshAccount, loadHistory]);
+
+  const connected = walletConnected || Boolean(wallet?.connected);
+  const nowMs = Date.now();
+  const left = leftThisWeek(wallet ? { ...wallet, connected } : connected ? { connected, cap: null } : null, receipts, nowMs);
+  const capAsset = wallet?.cap ?? (receipts && receipts[0] ? { value: "0", assetCode: receipts[0].debit.assetCode, assetScale: receipts[0].debit.assetScale } : null);
+  const week = weekBars(receipts ?? [], nowMs, capAsset?.assetCode ?? "USD", capAsset?.assetScale ?? 2);
+  const limitPct = left.kind === "left" && BigInt(left.limit.value) > BigInt(0) ? Number((BigInt(left.spent.value) * BigInt(100)) / BigInt(left.limit.value)) : null;
+  const today = new Date().toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" });
+  const sayLeft = () => void speak(leftSentence(left)).catch(() => undefined);
+
+  const orbMode: OrbMode = live.active ? (live.paused ? "idle" : "listening") : listening ? "listening" : begun && liveUsable && !live.failed && !ready ? "connecting" : "idle";
+  const statusLabel = working ? "Thinking" : orbMode === "listening" ? "Listening" : live.active && live.paused ? "Paused" : orbMode === "connecting" ? "Connecting" : "Ready";
+  const talkLabel = live.active ? (live.paused ? "Talk" : "Pause") : "Talk";
+
+  // Sheets sit over the board; on a wide screen the voice panel stays visible beside them, so "no" by voice still works.
+  const noteEl = walletNote || (resume && !approving) ? (
+    <div className="card wallnote" aria-live="polite">
+      {walletNote && <p>{walletNote}</p>}
+      {resumeBtn}
+    </div>
+  ) : null;
+  const barTab: Tab = sheet === "history" ? "activity" : sheet === "settings" ? "settings" : tab;
+  const onTab = (t: Tab) => {
+    if (t === "activity") return setSheet("history");
+    if (t === "settings") return setSheet("settings");
+    setSheet(null);
+    setTab(t);
+  };
 
   return (
     <>
-    {startEl}
-    <div className="app" inert={!begun}>
-      <Header nano={nano} liveVoice={liveUsable} />
-      {langEl}
-      <div className="panel-body" role="tabpanel" id="panel-talk" aria-labelledby="tab-talk" hidden={tab !== "talk"}>
-        {walletEl(false)}
-        {welcomeEl}
-        {chatEl}
-        {checkboxEl}
+      {startEl}
+      <div className="dash" inert={!begun} data-tab={tab}>
+        <Rail tab={sheet ? "settings" : "home"} onTab={onTab} onTalk={onMic} onSettings={() => setSheet("settings")} />
+        <main className="board" id="top">
+          <BoardTop name="" today={today} connected={connected} onConnect={firebaseConfigured() ? () => void connectWallet() : undefined} onSettings={() => setSheet("settings")} />
+          {noteEl}
+          <section className="row-1">
+            <WalletStack
+              name=""
+              payCode={code}
+              left={left}
+              connected={connected}
+              onConnect={firebaseConfigured() ? () => void connectWallet() : undefined}
+              onSayCode={() => code && void speak(payCodeSpeech(code)).catch(() => undefined)}
+              onSayLeft={sayLeft}
+              onTalk={onMic}
+              talkLabel={talkLabel}
+            />
+            <SpentCard week={week} limitPct={limitPct} />
+          </section>
+          <section className="row-2">
+            <PeopleCard contacts={CONTACTS} onSend={onMic} />
+            <ActivityCard receipts={receipts} onAll={() => setSheet("history")} />
+          </section>
+          <SafetyTiles fingerprint={hasPasskey} limit={wallet?.cap ?? null} payCode={code} onSayCode={() => code && void speak(payCodeSpeech(code)).catch(() => undefined)} />
+        </main>
+        <VoicePanel
+          mode={orbMode}
+          statusLabel={statusLabel}
+          ai={aiPill(nano, liveUsable)}
+          hint={hint}
+          micLabel={micLabel}
+          micOn={listening || live.active}
+          onMic={onMic}
+          typed={typed}
+          onTyped={setTyped}
+          onSubmit={() => void submitTyped()}
+          inputRef={inputBox}
+        >
+          {welcomeEl}
+          {chatEl}
+        </VoicePanel>
+        <TabBar tab={barTab} onTab={onTab} />
+        {requestEl && <Sheet label="Payment request from a shop" bare>{requestEl}</Sheet>}
+        {setupEl && <Sheet label="First-time setup" bare>{setupEl}</Sheet>}
+        {approveEl && <Sheet label="Approve payment" bare>{approveEl}</Sheet>}
+        {sheet === "history" && (
+          <Sheet label="Your payments" title="Your payments" onClose={() => setSheet(null)}>
+            <div className="hist"><History h={hist} speak={speak} /></div>
+          </Sheet>
+        )}
+        {sheet === "settings" && (
+          <Sheet label="Voice and settings" title="Voice and settings" onClose={() => setSheet(null)}>
+            <div className="settings">
+              {langEl}
+              {checkboxEl}
+              <PayCode code={code} speak={speak} />
+              <PrivacyCard facts={privacyFacts} />
+            </div>
+          </Sheet>
+        )}
       </div>
-      <div className="panel-body" role="tabpanel" id="panel-receipts" aria-labelledby="tab-receipts" hidden={tab !== "receipts"}>
-        <PayCode speak={speak} />
-        <History refreshKey={historyKey} speak={speak} />
-      </div>
-      <div className="panel-body" role="tabpanel" id="panel-privacy" aria-labelledby="tab-privacy" hidden={tab !== "privacy"}>
-        <section className="card" aria-labelledby="privacy-h">
-          <h2 id="privacy-h">Privacy</h2>
-          <p>
-            <b>On this device:</b> when Gemini Nano is ready, your words are understood inside this browser and go nowhere.
-          </p>
-          <p>
-            <b>Online, hidden:</b> if the cloud model is used, it only receives text with names and amounts replaced. A spoken PIN is stopped before any AI or network call.
-          </p>
-          <p>The AI never approves or sends money. You approve each payment yourself on the card.</p>
-          <p>Test money only. Test contacts (Mama Ade, Tunde, Chidi Okafor) are simulated.</p>
-          <div className="facts">
-            <span>Gemini Nano: <b>{nano}</b></span>
-            <span>Speech recognition: <b>{speechWords}</b></span>
-            <span>Voice: <b>{voiceWords}</b></span>
-            <span>Policy: <b>{policy}</b></span>
-            {!firebaseConfigured() && <span><b>Firebase not configured: plain rules only</b></span>}
-          </div>
-        </section>
-      </div>
-      <Dock hint={hint} listening={listening || live.active} micLabel={micLabel} onMic={onMic} typed={typed} onTyped={setTyped} onSubmit={() => void submitTyped()} inputRef={inputBox} tab={tab} onTab={setTab} />
-    </div>
     </>
   );
 }

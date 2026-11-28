@@ -4,7 +4,7 @@ import { interactionHash } from "../op/hash";
 import type { GrantLimits, PaymentsGateway, WalletInfo } from "../op/types";
 import { OpError } from "../op/types";
 import { MemoryStore } from "../store/memory";
-import { finishWalletConnect, startWalletConnect, type GrantRecord, type PendingRecord } from "./walletgrant";
+import { finishWalletConnect, startWalletConnect, walletStatus, type GrantRecord, type PendingRecord } from "./walletgrant";
 
 const payer: WalletInfo = { id: "https://w.test/payer", assetCode: "USD", assetScale: 2, authServer: "https://auth.w.test", resourceServer: "https://w.test/rs" };
 const NOW = Date.parse("2026-11-27T10:00:00.123Z");
@@ -157,5 +157,19 @@ describe("wallet connection audit", () => {
     expect(info.mock.calls.map((c) => c.join(" "))).toContain("audit wallet_callback failed");
     expect(JSON.stringify(await store.list("audit")) + info.mock.calls.join()).not.toMatch(/RAW-|continue|token/i);
     vi.restoreAllMocks();
+  });
+});
+
+describe("walletStatus (what the home screen may show: the limit and its week, never a token)", () => {
+  it("says not connected when there is no grant", async () => {
+    expect(await walletStatus(new MemoryStore(), "u1")).toEqual({ ok: true, connected: false, cap: null });
+  });
+  it("returns the weekly limit and interval of the saved grant and nothing secret", async () => {
+    const store = new MemoryStore();
+    await store.put("grants", "u1", { accessToken: "SEALED-A", manageUrl: "https://m", continueUri: "https://c", continueToken: "SEALED-C", cap: { value: "5000", assetCode: "USD", assetScale: 2 }, interval: "R/2026-11-22T10:00:00Z/P1W" });
+    const s = await walletStatus(store, "u1");
+    expect(s).toEqual({ ok: true, connected: true, cap: { value: "5000", assetCode: "USD", assetScale: 2 }, interval: "R/2026-11-22T10:00:00Z/P1W" });
+    expect(JSON.stringify(s)).not.toMatch(/SEALED|https/);
+    expect(await walletStatus(store, "someone-else")).toMatchObject({ connected: false });
   });
 });

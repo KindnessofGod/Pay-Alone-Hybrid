@@ -6,10 +6,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, firebaseConfigured } from "@/lib/firebase/client";
 import { parseMajor } from "@/lib/money";
 import { isEmbedMuted } from "@/lib/embed";
-import { formatPayCode, shopStatusView } from "@/lib/ui/requestprompt";
+import { shopStatusView } from "@/lib/ui/requestprompt";
+import { addRecent, parseRecents } from "@/lib/ui/recents";
 import { ShopForm, ShopShell, ShopStatus } from "./ShopView";
 
 const NAME_KEY = "payalone.shopName";
+const RECENT_KEY = "payalone.shopRecents";
 const POLL_MS = 2000;
 
 const ERRORS: Record<string, string> = {
@@ -60,10 +62,12 @@ export default function ShopPage() {
   // /shop?embed=1&demo=1 is the shop app inside the /demo iPhone frame: it asks the customer's own pay code.
   const [demo, setDemo] = useState(false);
   const codeTouched = useRef(false);
+  const [recents, setRecents] = useState<string[]>([]); // pay codes this browser asked before (codes only)
 
   useEffect(() => {
     try {
       setShopName(window.localStorage.getItem(NAME_KEY) ?? "");
+      setRecents(parseRecents(window.localStorage.getItem(RECENT_KEY)));
     } catch {
       /* no storage: the name is typed each time */
     }
@@ -76,7 +80,7 @@ export default function ShopPage() {
     api<{ code: string }>("/api/paycode", {})
       .then((r) => {
         if (off || !r.ok || !/^\d{6}$/.test(r.code) || codeTouched.current) return;
-        setCode(formatPayCode(r.code));
+        setCode(r.code);
       })
       .catch(() => undefined);
     return () => {
@@ -102,6 +106,13 @@ export default function ShopPage() {
       const r = await api<{ request: { id: string; ref: string } }>("/api/shop/ask", { ...(demo ? { demo: true } : {}), code, amountMinor: minor, shopName, note: note || undefined });
       if (!r.ok) return setError(ERRORS[r.reason ?? ""] ?? "Something went wrong. Nothing was sent. Please try again.");
       spoken.current = "";
+      const next = addRecent(recents, code);
+      setRecents(next);
+      try {
+        window.localStorage.setItem(RECENT_KEY, JSON.stringify(next));
+      } catch {
+        /* no storage: the list lasts for this visit */
+      }
       setLive({ id: r.request.id, ref: r.request.ref, shopName: shopName.trim(), amount: { value: minor, assetCode: "NGN", assetScale: 2 }, status: "pending" });
     } catch {
       setError("I could not reach the server. Nothing was sent. Please try again.");
@@ -161,7 +172,7 @@ export default function ShopPage() {
       {view && live ? (
         <ShopStatus tone={view.tone} headline={view.headline} sub={view.sub} shop={live.shopName} onNew={again} />
       ) : (
-        <ShopForm shopName={shopName} code={code} amount={amount} note={note} error={error} busy={busy} hideNote={demo} onShopName={changeName} onCode={(v) => {
+        <ShopForm shopName={shopName} code={code} amount={amount} note={note} error={error} busy={busy} hideNote={demo} recents={recents} onShopName={changeName} onCode={(v) => {
           codeTouched.current = true;
           setCode(v);
         }} onAmount={setAmount} onNote={setNote} onAsk={() => void ask()} />

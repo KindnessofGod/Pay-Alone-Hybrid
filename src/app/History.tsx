@@ -4,13 +4,16 @@
 // visitor in just to look).
 import { useCallback, useEffect, useState } from "react";
 import { api, firebaseConfigured, reportEvent } from "@/lib/firebase/client";
-import { formatAmount } from "@/lib/money";
+import { bigAmount } from "@/lib/ui/amountview";
 import { ReceiptRow } from "./ui";
 import { activityLine, badgeOf, debugRow, receiptSentence, type EventView, type ReceiptView } from "@/lib/ui/history";
 
 type Loaded = { receipts: ReceiptView[]; events: EventView[] };
 
-export default function History({ refreshKey, speak }: { refreshKey: number; speak: (t: string) => Promise<void> }) {
+export type HistoryState = { data: Loaded | null; note: string; busy: boolean; load: (signIn: boolean) => Promise<void> };
+
+/** Loads the person's receipts and activity. On page load (only if already signed in) and again whenever refreshKey changes. */
+export function useHistory(refreshKey: number): HistoryState {
   const [data, setData] = useState<Loaded | null>(null);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
@@ -37,11 +40,14 @@ export default function History({ refreshKey, speak }: { refreshKey: number; spe
     }
   }, []);
 
-  // On page load (only if already signed in) and again after every payment.
   useEffect(() => {
     void load(false);
   }, [load, refreshKey]);
+  return { data, note, busy, load };
+}
 
+export default function History({ h, speak }: { h: HistoryState; speak: (t: string) => Promise<void> }) {
+  const { data, note, busy, load } = h;
   const last = data?.receipts[0];
   return (
     <section aria-labelledby="history-h" className="chat history">
@@ -66,7 +72,7 @@ export default function History({ refreshKey, speak }: { refreshKey: number; spe
               key={r.id}
               name={r.payeeName}
               sub={`${new Date(r.createdAt).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })} · ${r.method === "passkey" ? "fingerprint" : "PIN"}`}
-              amount={formatAmount(r.debit)}
+              amount={bigAmount(r.debit)}
               badge={badgeOf(r)}
               simulated={r.simulated}
             />

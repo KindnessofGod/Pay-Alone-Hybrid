@@ -1,9 +1,10 @@
 // Presentational pieces of the screen. No logic and no data of their own: the page and Approve pass
 // everything in, and /design-preview passes fixed sample props.
 import { useEffect, type ReactNode, type Ref } from "react";
+import { GlassOrb } from "./GlassOrb";
 import { LANGS, type LangCode } from "@/lib/hybrid/languages";
 import { reportEvent } from "@/lib/firebase/client";
-import { aiPill, sourceChip } from "@/lib/ui/status";
+import { sourceChip } from "@/lib/ui/status";
 import { formatPayCode, requestReceiptLine } from "@/lib/ui/requestprompt";
 
 export function FingerprintIcon({ color = "#ffffff" }: { color?: string }) {
@@ -11,48 +12,6 @@ export function FingerprintIcon({ color = "#ffffff" }: { color?: string }) {
     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" aria-hidden="true">
       <path d="M12 11v3M8 9a4 4 0 0 1 8 0v4M5 12V9a7 7 0 0 1 14 0v3M9 16c.5 2 1.5 3.5 3 5M15 15c0 2-.5 4-1.5 5.5" />
     </svg>
-  );
-}
-
-export function Header({ nano, right, liveVoice = false }: { nano: string; right?: ReactNode; liveVoice?: boolean }) {
-  const p = aiPill(nano, liveVoice);
-  return (
-    <header>
-      <div className="logo">
-        <div className="mark" aria-hidden="true">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3" /></svg>
-        </div>
-        <h1>Pay alone.</h1>
-      </div>
-      <div className="hdr-right">
-        <div className={`pill tone-${p.tone}`} role="status">
-          <span className="dot" aria-hidden="true" />
-          {p.label}
-        </div>
-        {right}
-      </div>
-    </header>
-  );
-}
-
-export function WalletCard({ note, connected, onConnect, children, compact = false }: { note?: string; connected?: boolean; onConnect?: () => void; children?: ReactNode; compact?: boolean }) {
-  return (
-    <section className={compact ? "wallet chipbar" : "wallet"} aria-label="Wallet">
-      {connected ? (
-        <>
-          <b><span aria-hidden="true">✓</span> Test wallet connected</b>
-          {!compact && <small>Your weekly limit protects you</small>}
-        </>
-      ) : onConnect ? (
-        <button type="button" className="walletbtn" onClick={onConnect}>
-          Connect your test wallet
-        </button>
-      ) : (
-        <b>Test wallet</b>
-      )}
-      {note && <p>{note}</p>}
-      {children}
-    </section>
   );
 }
 
@@ -237,67 +196,6 @@ export function ReceiptRow({ name, sub, amount, badge, simulated }: { name: stri
   );
 }
 
-export type Tab = "talk" | "receipts" | "privacy";
-const TABS: { id: Tab; label: string }[] = [
-  { id: "talk", label: "Talk" },
-  { id: "receipts", label: "Receipts" },
-  { id: "privacy", label: "Privacy" },
-];
-
-export function Dock({
-  hint,
-  listening,
-  micLabel,
-  onMic,
-  typed,
-  onTyped,
-  onSubmit,
-  inputRef,
-  tab,
-  onTab,
-  desk = false,
-}: {
-  hint: string;
-  listening: boolean;
-  micLabel: string;
-  onMic?: () => void;
-  typed: string;
-  onTyped?: (v: string) => void;
-  onSubmit?: () => void;
-  inputRef?: Ref<HTMLInputElement>;
-  tab: Tab;
-  onTab?: (t: Tab) => void;
-  desk?: boolean;
-}) {
-  return (
-    <div className="dock">
-      <button type="button" className="mic" aria-pressed={listening} aria-label={micLabel} onClick={onMic}>
-        <svg viewBox="0 0 24 24" fill="none" stroke="#c3e88f" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
-          <rect x="9" y="3" width="6" height="11" rx="3" />
-          <path d="M5 11a7 7 0 0 0 14 0M12 18v3" />
-        </svg>
-      </button>
-      <p className="hint" aria-live="polite">{hint}</p>
-      <div className="type">
-        <input ref={inputRef} aria-label="Or type what you want to do" placeholder="Or type here" value={typed} onChange={(e) => onTyped?.(e.target.value)} onKeyDown={(e) => e.key === "Enter" && onSubmit?.()} />
-        <button type="button" onClick={() => onSubmit?.()}>Go</button>
-      </div>
-      {!desk && (
-        <>
-          <div className="tabs" role="tablist" aria-label="Sections">
-            {TABS.map((t) => (
-              <button key={t.id} type="button" role="tab" id={`tab-${t.id}`} aria-selected={tab === t.id} aria-controls={`panel-${t.id}`} onClick={() => (t.id !== tab && reportEvent({ event: "tab_switch", tab: t.id }), onTab?.(t.id))}>
-                {t.label}
-              </button>
-            ))}
-          </div>
-          <p className="sim-line">Test money only</p>
-        </>
-      )}
-    </div>
-  );
-}
-
 /** The AI voice's language. Labelled, native-name options, remembered by the page. */
 export function LanguagePicker({ value, onChange, id = "lang", className = "" }: { value: LangCode; onChange?: (c: LangCode) => void; id?: string; className?: string }) {
   return (
@@ -323,10 +221,11 @@ export function StartLayer({ lang, onLang, onStart, busy = false, inline = false
   return (
     <div className={`startlayer${inline ? " inline" : ""}`} role="button" tabIndex={0} autoFocus={!inline} aria-label="Pay Alone. Press any key or tap anywhere to start. Pay Alone will then speak to you." onClick={() => onStart?.()} aria-busy={busy}>
       <div className="startinner">
-        <div className="mark big" aria-hidden="true">
-          <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3" /></svg>
+        <div className="startbrand" aria-hidden="true">
+          <span className="mark big"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6l8-3zm-3 9l2 2 4-4" /></svg></span>
+          <span className="startname">Pay Alone</span>
         </div>
-        <p className="startname">Pay alone.</p>
+        <div className="startorb"><GlassOrb mode={busy ? "connecting" : "idle"} size="min(17rem, 54vw)" /></div>
         <p className="starttext">{busy ? "Starting…" : "Press any key or tap anywhere to start"}</p>
         <p className="startsub">Pay Alone will speak to you first. You can talk to it. Test money only.</p>
         <div className="startlang" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
@@ -341,7 +240,7 @@ export function StartLayer({ lang, onLang, onStart, busy = false, inline = false
 export function FingerprintWait({ title, hint, onPin, onCancel }: { title: string; hint: string; onPin?: () => void; onCancel?: () => void }) {
   return (
     <div className="fpwait" role="status">
-      <div className="fpicon" aria-hidden="true"><FingerprintIcon color="#0e7a55" /></div>
+      <div className="fpicon" aria-hidden="true"><FingerprintIcon color="currentColor" /></div>
       <p className="fptitle">{title}</p>
       <p className="note">{hint}</p>
       <div className="stack">

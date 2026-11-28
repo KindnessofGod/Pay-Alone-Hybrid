@@ -150,3 +150,10 @@ export async function finishWalletConnect(a: Parameters<typeof finishInner>[0]):
   await audit(a.store, r.userId ?? null, "wallet_callback", { outcome: r.ok ? "connected" : "failed" });
   return { ok: r.ok };
 }
+
+/** For the home screen: is a wallet connected, and what weekly limit did the person agree to. No tokens, no URLs. */
+export async function walletStatus(store: Store, userId: string): Promise<{ ok: true; connected: boolean; cap: Amount | null; interval?: string }> {
+  const g = await store.get<GrantRecord>("grants", userId);
+  if (!g) return { ok: true, connected: false, cap: null };
+  return { ok: true, connected: true, cap: g.cap ?? null, ...(g.interval ? { interval: g.interval } : {}) };
+}
