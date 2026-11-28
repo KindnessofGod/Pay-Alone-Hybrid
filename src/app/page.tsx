@@ -88,6 +88,11 @@ export default function Home() {
   const speechRef = useRef<SpeechStatus | "checking">("checking");
   speechRef.current = speech;
   const installing = useRef(false);
+  const stopAsked = useRef(false); // the person pressed stop (or typed) while the mic was open
+  const stopMic = useCallback(() => {
+    stopAsked.current = true;
+    stopListening();
+  }, []);
 
   const setCloudOptIn = useCallback((on: boolean) => {
     setCloudSpeech(on);
@@ -128,7 +133,15 @@ export default function Home() {
   }, [addTurn]);
 
   const speak = useCallback(async (t: string) => {
-    await say(t);
+    const t0 = performance.now();
+    const engine = !t ? "none" : speaker.status() === "ready" ? "kokoro" : "browser";
+    try {
+      await say(t);
+      reportEvent({ event: "speak", engine, ms: Math.round(performance.now() - t0), ok: true });
+    } catch (e) {
+      reportEvent({ event: "speak", engine, ms: Math.round(performance.now() - t0), ok: false });
+      throw e;
+    }
   }, []);
 
   // Gemini Live prototype: OFF unless the page was opened with ?live=1 (remembered for this tab session).
@@ -221,14 +234,15 @@ export default function Home() {
   async function submitTyped(override?: string) {
     const text = override ?? typed;
     if (!text) return;
-    stopListening(); // typing wins over a microphone that is still open
+    if (override === undefined) reportEvent({ event: "typed_submit", chars: text.length }); // the length only, never the text
+    stopMic(); // typing wins over a microphone that is still open
     lastInput.current = "typed";
     setTyped("");
     try {
       const s = ready ? undefined : await start(false);
       await handle(text, s, "typed");
     } catch {
-      reportEvent({ event: "error", code: "start_failed" });
+      reportEvent({ event: "client_error", where: "start", code: "failed" });
       setWorking("Something went wrong. Please try again.");
     }
   }
@@ -241,6 +255,7 @@ export default function Home() {
       const my = ++seq.current;
       setWorking("Working on it…");
       let r: Understood;
+      const tU = performance.now();
       // Plain conversation (no name, amount or money word, nothing pending) skips the payment model and goes
       // straight to the chat AI: one on-device call instead of two. The PIN tripwire still runs first.
       const pendingPay = Boolean(dialog.current.payeeId || dialog.current.amountMinor);
@@ -253,7 +268,7 @@ export default function Home() {
           cloud: (x) => (setWorking("Asking online, with names and amounts hidden…"), firebaseEngines.cloud(x)),
         });
       } catch {
-        reportEvent({ event: "error", code: "understand_failed" });
+        reportEvent({ event: "client_error", where: "understand", code: "failed" });
         if (my !== seq.current) return false;
         setWorking("Something went wrong. Please try again.");
         await speak("Something went wrong. Please try again.");
@@ -263,6 +278,14 @@ export default function Home() {
       setWorking("");
       setMs(lastCall.ms);
       setResult(r);
+      // Codes, route and times only: never the sentence, names, amounts or digits.
+      reportEvent({
+        event: "understand_done",
+        source: justChat ? "none" : r.source,
+        kind: r.kind,
+        ms: Math.max(0, Math.round(performance.now() - tU)),
+        cloud_raced: r.source === "on_device" && "sentToCloud" in r && r.sentToCloud !== undefined,
+      });
       // Only the route and the time are reported, never the sentence, names or amounts.
       reportEvent({ event: "intent", source: r.source, ms: r.source === "rules" ? 0 : Math.max(0, Math.round(lastCall.ms)) });
       // The conversation decides what to say next. Its lines are fixed templates; it never approves anything.
@@ -272,6 +295,7 @@ export default function Home() {
       let ai: { source: "on_device" | "cloud"; sent?: string } | undefined;
       if (o.chat && c.policy !== "ai_off") {
         setWorking("Thinking…");
+        const tC = performance.now();
         try {
           const cr = await chatReply(history.current, said, { contacts: CONTACTS, policy: c.policy, deviceAvailable: c.nano === "available" || c.nano === "warming up" }, {
             onDeviceBusy: chatEngines.onDeviceBusy,
@@ -282,6 +306,7 @@ export default function Home() {
           if (cr.kind === "reply") {
             setMs(lastCall.ms);
             reportEvent({ event: "chat_reply", source: cr.source, guarded: Boolean(cr.guarded) });
+            reportEvent({ event: "chat_done", source: cr.source, ms: Math.max(0, Math.round(performance.now() - tC)), guarded: Boolean(cr.guarded) });
             if (!cr.guarded) {
               o.state = o.chat.state; // a real answer is not a miss
               o.say = `${cr.text}${o.chat.suffix ? ` ${o.chat.suffix}` : ""}`;
@@ -291,7 +316,7 @@ export default function Home() {
             // A guarded (unsafe or empty) AI answer is never spoken: the dialog's own friendly fixed line is used.
           }
         } catch {
-          reportEvent({ event: "error", code: "chat_failed" });
+          reportEvent({ event: "client_error", where: "chat", code: "failed" });
           // chat is optional: keep the fixed line
         }
         if (my !== seq.current) return false;
@@ -322,8 +347,13 @@ export default function Home() {
 
   const talk = useCallback(
     async (auto = false, forceCloud = false) => {
-      if (busy.current) return stopListening(); // a second press stops listening
+      const sp = speech === "installable" ? "none" : speech;
+      if (busy.current) {
+        if (!auto) reportEvent({ event: "mic_tap", state: "stop", speech: sp });
+        return stopMic(); // a second press stops listening
+      }
       if (speech === "checking") {
+        if (!auto) reportEvent({ event: "mic_tap", state: "blocked", speech: sp });
         await speak("One moment, I am checking speech on this computer.");
         return;
       }
@@ -331,6 +361,7 @@ export default function Home() {
       const mode = speechMode(speech, cloudSpeech || forceCloud);
       if (!mode.mic) {
         if (auto) return;
+        reportEvent({ event: "mic_tap", state: "blocked", speech: sp });
         if (speech === "none") {
           await speak("This browser cannot hear speech. Please type instead.");
           return;
@@ -338,15 +369,21 @@ export default function Home() {
         await askConsent();
         return;
       }
+      if (!auto) reportEvent({ event: "mic_tap", state: "start", speech: sp });
       lastInput.current = "voice";
       busy.current = true;
       setConsent(false);
       setLiveWords("");
       setListening(true);
       let again = false;
+      const tL = performance.now();
+      stopAsked.current = false;
+      reportEvent({ event: "listen_start", mode: mode.local ? "local" : "online" });
       try {
         const before = seq.current;
         const said = await listenOnce({ local: mode.local, onInterim: setLiveWords });
+        // Only how it ended and how long the words were, never the words.
+        reportEvent({ event: "listen_end", outcome: said ? "heard" : stopAsked.current ? "stopped" : "silence", ms: Math.round(performance.now() - tL), chars: said.length });
         setListening(false);
         setLiveWords("");
         if (seq.current !== before) return; // the person typed while the mic was open: their typing wins
@@ -364,6 +401,7 @@ export default function Home() {
         setLiveWords("");
         const info = e instanceof SpeechError ? e.info : speechErrorInfo("other");
         reportEvent({ event: "speech_error", code: info.code }); // only the code, never words
+        reportEvent({ event: "listen_end", outcome: "error", ms: Math.round(performance.now() - tL), chars: 0 });
         if (info.kind === "language" && mode.local) {
           setSpeech("server"); // on-device speech cannot do this language: offer the online choice
           if (!(cloudSpeech || forceCloud)) await askConsent();
@@ -410,6 +448,7 @@ export default function Home() {
 
   // Live mic button: start or stop the Live conversation. Falls back to the normal flow if Live fails.
   const toggleLive = useCallback(async () => {
+    reportEvent({ event: "mic_tap", state: live.active ? "stop" : "start", speech: speechRef.current === "installable" ? "none" : speechRef.current });
     if (live.active) {
       await live.stop();
       return;
@@ -467,8 +506,10 @@ export default function Home() {
   const micLabel = live.active ? "Live voice is on. Press to stop" : !ready ? "Tap to start talking" : listening ? "Listening. Press to stop" : "Press to speak (or Space)";
   const onMic = () => {
     if (liveOn && !live.failed) void toggleLive();
-    else if (!ready) void start().catch(() => setWorking("Something went wrong while starting. Please reload the page."));
-    else void talk();
+    else if (!ready) {
+      reportEvent({ event: "mic_tap", state: "start", speech: speech === "installable" ? "none" : speech });
+      void start().catch(() => setWorking("Something went wrong while starting. Please reload the page."));
+    } else void talk();
   };
 
   // What the latest request showed: what the cloud received, skipped parts and model time. Kept in full.
@@ -525,7 +566,7 @@ export default function Home() {
             <ul className="examples" aria-label="Try one of these">
               {EXAMPLES.map((ex) => (
                 <li key={ex}>
-                  <button type="button" className="example" onClick={() => void submitTyped(ex)}>
+                  <button type="button" className="example" onClick={() => (reportEvent({ event: "example_chip", index: EXAMPLES.indexOf(ex) }), void submitTyped(ex))}>
                     {ex}
                   </button>
                 </li>
@@ -549,6 +590,7 @@ export default function Home() {
               type="button"
               className="btn primary"
               onClick={() => {
+                reportEvent({ event: "approve_action", action: "continue", outcome: "ok", ms: 0 });
                 setApproving({ ...resume, key: Date.now() });
                 setResume(null);
                 setWalletNote("");

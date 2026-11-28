@@ -6,7 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api, firebaseConfigured, reportEvent } from "@/lib/firebase/client";
 import { formatAmount } from "@/lib/money";
 import { ReceiptRow } from "./ui";
-import { activityLine, badgeOf, receiptSentence, type EventView, type ReceiptView } from "@/lib/ui/history";
+import { activityLine, badgeOf, debugLine, receiptSentence, type EventView, type ReceiptView } from "@/lib/ui/history";
 
 type Loaded = { receipts: ReceiptView[]; events: EventView[] };
 
@@ -18,17 +18,20 @@ export default function History({ refreshKey, speak }: { refreshKey: number; spe
   const load = useCallback(async (signIn: boolean) => {
     if (!firebaseConfigured()) return;
     setBusy(true);
+    const t0 = performance.now();
     try {
       const r = await api<Loaded>("/api/history", {}, { signIn });
       if (r.ok) {
+        reportEvent({ event: "history_load", count: (r.receipts ?? []).length, ms: Math.round(performance.now() - t0) });
         setData({ receipts: r.receipts ?? [], events: r.events ?? [] });
         setNote("");
       } else if (r.reason !== "signed_out") {
         setNote("Could not load your receipts. Please try again.");
-        reportEvent({ event: "error", code: "history_failed" });
+        reportEvent({ event: "client_error", where: "history", code: "failed" });
       }
     } catch {
       setNote("Could not load your receipts. Please try again.");
+      reportEvent({ event: "client_error", where: "history", code: "unreachable" });
     } finally {
       setBusy(false);
     }
@@ -47,7 +50,7 @@ export default function History({ refreshKey, speak }: { refreshKey: number; spe
         <button type="button" className="btn ghost small" onClick={() => void load(true)} disabled={busy}>
           {data ? "Refresh" : "Show my receipts and activity"}
         </button>
-        <button type="button" className="btn ghost small" disabled={!last} onClick={() => void speak(last ? receiptSentence(last) : "").catch(() => undefined)}>
+        <button type="button" className="btn ghost small" disabled={!last} onClick={() => (reportEvent({ event: "read_receipt" }), void speak(last ? receiptSentence(last) : "").catch(() => undefined))}>
           <span aria-hidden="true">🔊</span> Read my last receipt
         </button>
       </div>
@@ -74,10 +77,20 @@ export default function History({ refreshKey, speak }: { refreshKey: number; spe
         <>
           <h3 className="h3">Activity</h3>
           <ul aria-label="Activity, newest first" className="note">
-            {data.events.map((e, i) => (
+            {data.events.slice(0, 30).map((e, i) => (
               <li key={`${e.at}-${i}`}>{activityLine(e)}</li>
             ))}
           </ul>
+          <details>
+            <summary>Debug log: my last {data.events.length} steps</summary>
+            <ol aria-label="Debug log, newest first" className="note">
+              {data.events.map((e, i) => (
+                <li key={`d${e.at}-${i}`}>
+                  <code>{debugLine(e)}</code>
+                </li>
+              ))}
+            </ol>
+          </details>
         </>
       )}
     </section>

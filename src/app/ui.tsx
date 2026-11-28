@@ -1,6 +1,7 @@
 // Presentational pieces of the screen. No logic and no data of their own: the page and Approve pass
 // everything in, and /design-preview passes fixed sample props.
-import type { ReactNode, Ref } from "react";
+import { useEffect, type ReactNode, type Ref } from "react";
+import { reportEvent } from "@/lib/firebase/client";
 import { aiPill, sourceChip } from "@/lib/ui/status";
 
 export function FingerprintIcon({ color = "#ffffff" }: { color?: string }) {
@@ -123,13 +124,14 @@ export const SPEECH_CONSENT_TEXT = "To hear you now, I can use Google's online s
 
 /** The one-tap choice for online speech. Nothing is sent to Google until "Use online speech" is pressed. */
 export function SpeechConsent({ onYes, onNo }: { onYes: () => void; onNo: () => void }) {
+  useEffect(() => reportEvent({ event: "speech_consent", choice: "shown" }), []);
   return (
     <li className="b ai consent" role="group" aria-label="Online speech choice">
       <span className="vh">Pay Alone: </span>
       <p>To hear you now, I can use Google&apos;s online speech. <b>Your voice is sent to Google.</b> You will never say your PIN out loud; you type it. Use online speech?</p>
       <div className="stack">
-        <button type="button" className="btn primary" onClick={onYes}>Use online speech</button>
-        <button type="button" className="btn ghost" onClick={onNo}>I&apos;ll type instead</button>
+        <button type="button" className="btn primary" onClick={() => (reportEvent({ event: "speech_consent", choice: "online" }), onYes())}>Use online speech</button>
+        <button type="button" className="btn ghost" onClick={() => (reportEvent({ event: "speech_consent", choice: "type" }), onNo())}>I&apos;ll type instead</button>
       </div>
     </li>
   );
@@ -175,7 +177,7 @@ export function ReceiptCard({
       {how && <p className="sub">{how}</p>}
       <span className={`badge ${simulated ? "sim" : ""}`}>{simulated ? "SIMULATED: no real money moved" : "REAL TEST-WALLET PAYMENT"}</span>
       {onRead && (
-        <button type="button" className="btn ghost" onClick={onRead}>
+        <button type="button" className="btn ghost" onClick={() => (reportEvent({ event: "read_receipt" }), onRead())}>
           <span aria-hidden="true">🔊</span> Read my receipt
         </button>
       )}
@@ -247,7 +249,7 @@ export function Dock({
         <>
           <div className="tabs" role="tablist" aria-label="Sections">
             {TABS.map((t) => (
-              <button key={t.id} type="button" role="tab" id={`tab-${t.id}`} aria-selected={tab === t.id} aria-controls={`panel-${t.id}`} onClick={() => onTab?.(t.id)}>
+              <button key={t.id} type="button" role="tab" id={`tab-${t.id}`} aria-selected={tab === t.id} aria-controls={`panel-${t.id}`} onClick={() => (t.id !== tab && reportEvent({ event: "tab_switch", tab: t.id }), onTab?.(t.id))}>
                 {t.label}
               </button>
             ))}

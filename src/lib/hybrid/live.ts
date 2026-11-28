@@ -159,7 +159,21 @@ export interface LiveDeps {
   /** The person talked over the model: drop any audio still queued. */
   onInterrupted?: () => void;
   /** Called once. code is a fixed word for the audit event, never text. */
-  onEnd: (how: LiveEnd, code?: string) => void;
+  onEnd: (how: LiveEnd, code?: string, detail?: { reason: string; closeCode?: number }) => void;
+}
+
+/** Error text for the step log: name and message, every digit removed, only letters, spaces and . : _ - kept, max 100. */
+export function sanitizeReason(e: unknown): string {
+  const raw = e instanceof Error ? `${e.name} ${e.message}` : String(e);
+  return raw.replace(/[^A-Za-z .:_-]/g, "").replace(/\s+/g, " ").trim().slice(0, 100);
+}
+
+/** An integer WebSocket close code, if the error carries one. */
+export function closeCodeOf(e: unknown): number | undefined {
+  if (!e || typeof e !== "object") return undefined;
+  const o = e as Record<string, unknown>;
+  for (const v of [o.code, o.closeCode]) if (typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= 65_535) return v;
+  return undefined;
 }
 
 export function liveErrorCode(e: unknown): string {
@@ -176,7 +190,7 @@ export function runLive(session: LiveSessionLike, d: LiveDeps, opts: { startMute
   let muted = Boolean(opts.startMuted);
   const gate = createMicGate<string>((b64) => void session.sendAudioRealtime({ mimeType: "audio/pcm;rate=16000", data: b64 }).catch(() => undefined));
 
-  const finish = async (how: LiveEnd, code?: string) => {
+  const finish = async (how: LiveEnd, code?: string, detail?: { reason: string; closeCode?: number }) => {
     if (ended) return;
     ended = true;
     gate.pause();
@@ -185,7 +199,8 @@ export function runLive(session: LiveSessionLike, d: LiveDeps, opts: { startMute
     } catch {
       /* already closed */
     }
-    d.onEnd(how, code);
+    if (detail) d.onEnd(how, code, detail);
+    else d.onEnd(how, code);
   };
   const trip = async (secret: SecretKind) => {
     if (ended) return;
@@ -237,7 +252,7 @@ export function runLive(session: LiveSessionLike, d: LiveDeps, opts: { startMute
       }
       await finish("ended");
     } catch (e) {
-      await finish("error", liveErrorCode(e));
+      await finish("error", liveErrorCode(e), { reason: sanitizeReason(e), closeCode: closeCodeOf(e) });
     }
   })();
 

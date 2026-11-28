@@ -2,7 +2,7 @@
 // Approval of one payment. The server quotes, reads back and decides; this screen only collects the
 // PIN and sends it once. Voice can only say NO here: a spoken "yes" just asks for the PIN.
 import { useEffect, useRef, useState } from "react";
-import { api } from "@/lib/firebase/client";
+import { api, reportEvent } from "@/lib/firebase/client";
 import { yesNo } from "@/lib/hybrid/confirm";
 import { spokenSecret } from "@/lib/hybrid/tripwire";
 import { FINGERPRINT_FAILED, FINGERPRINT_OFFER, FINGERPRINT_PROMPT, fingerprintAvailable, fingerprintRequest } from "@/lib/ui/fingerprint";
@@ -56,12 +56,18 @@ export default function Approve({ payeeId, amountMinor, speak, listen, onClose, 
   const [offer, setOffer] = useState(false); // after a PIN receipt: offer the fingerprint once
   const req = useRef<{ requestId: string; challenge: string } | null>(null);
   const started = useRef(false);
+  const t0 = useRef(0); // when this card opened, for the payment_result time
+  // Step log: codes, outcomes and times only. Never the PIN, the amount or the names.
+  const lap = () => Math.max(0, Math.round(performance.now() - t0.current));
+  const paymentEnd = (outcome: "paid" | "failed" | "stopped", simulated?: boolean) =>
+    reportEvent({ event: "payment_result", outcome, ms: lap(), ...(simulated === undefined ? {} : { simulated }) });
 
   // Any network or sign-in failure becomes a spoken, honest message instead of a blank box.
   async function call<T = Record<string, unknown>>(path: string, body: unknown): Promise<T & { ok: boolean; reason?: string }> {
     try {
       return await api<T>(path, body);
     } catch {
+      reportEvent({ event: "client_error", where: "approve", code: "unreachable" });
       return { ok: false, reason: "unreachable" } as T & { ok: boolean; reason?: string };
     }
   }
@@ -79,6 +85,7 @@ export default function Approve({ payeeId, amountMinor, speak, listen, onClose, 
       setPhase("pin");
       const fp = Boolean(r.hasPasskey) && fingerprintAvailable();
       setHasPasskey(Boolean(r.hasPasskey));
+      reportEvent({ event: "approve_open", method_offered: fp ? "passkey" : "pin" });
       await tell(fp ? `${r.readBack} ${FINGERPRINT_PROMPT}` : r.readBack);
       void voiceNo();
     } else if (r.reason === "no_pin_set") {
@@ -88,6 +95,7 @@ export default function Approve({ payeeId, amountMinor, speak, listen, onClose, 
       setPhase("connect");
       await tell(approvalMessage({ ok: false, reason: r.reason }));
     } else {
+      paymentEnd("failed");
       setPhase("stopped");
       await tell(approvalMessage({ ok: false, reason: r.reason ?? "unknown" }));
     }
@@ -95,7 +103,9 @@ export default function Approve({ payeeId, amountMinor, speak, listen, onClose, 
 
   // One-time wallet connection: the wallet's own page is where the weekly limit is set and agreed to.
   async function connectWallet() {
+    const tW = performance.now();
     const r = await call<{ redirectUrl: string }>("/api/wallet/connect", {});
+    reportEvent({ event: "approve_action", action: "wallet_connect", outcome: r.ok && r.redirectUrl ? "ok" : "fail", ms: Math.round(performance.now() - tW) });
     if (r.ok && r.redirectUrl) {
       saveResume(window.sessionStorage, { payeeId, amountMinor }); // so the person can carry on after the wallet page
       window.location.href = r.redirectUrl;
@@ -117,6 +127,8 @@ export default function Approve({ payeeId, amountMinor, speak, listen, onClose, 
   }
 
   async function cancel() {
+    reportEvent({ event: "approve_action", action: "cancel", outcome: "cancel", ms: lap() });
+    paymentEnd("stopped");
     if (req.current) await call("/api/pay/cancel", { requestId: req.current.requestId }).catch(() => undefined);
     req.current = null;
     setPin("");
@@ -152,11 +164,14 @@ export default function Approve({ payeeId, amountMinor, speak, listen, onClose, 
     if (phase === "offer_pin") return void addFingerprint(p);
     if (phase !== "pin" || !req.current) return;
     setPhase("sending");
+    const tP = performance.now();
     const r = await call<{ receipt: Receipt; spoken: string; challenge?: string; triesLeft?: number }>("/api/pay/finish", {
       requestId: req.current.requestId,
       proof: { method: "pin", challenge: req.current.challenge, pin: p },
     });
+    reportEvent({ event: "approve_action", action: "pin", outcome: r.ok ? "ok" : "fail", ms: Math.round(performance.now() - tP) });
     if (r.ok) {
+      paymentEnd("paid", r.receipt.simulated);
       req.current = null;
       setReceipt(r.receipt);
       setApprovedBy("PIN");
@@ -174,6 +189,7 @@ export default function Approve({ payeeId, amountMinor, speak, listen, onClose, 
       req.current = { ...req.current, challenge: r.challenge };
       setPhase("pin");
     } else {
+      paymentEnd("failed");
       req.current = null;
       setPhase("stopped");
     }
@@ -186,10 +202,12 @@ export default function Approve({ payeeId, amountMinor, speak, listen, onClose, 
     const cur = req.current;
     setPhase("sending");
     let response: unknown;
+    const tF = performance.now();
     try {
       const { startAuthentication } = await import("@simplewebauthn/browser");
       response = await startAuthentication({ optionsJSON: fingerprintRequest(cur.challenge) });
     } catch {
+      reportEvent({ event: "approve_action", action: "fingerprint", outcome: "cancel", ms: Math.round(performance.now() - tF) });
       setPhase("pin"); // cancelled or no sensor: nothing reached the server, the same challenge still works
       return void tell(FINGERPRINT_FAILED);
     }
@@ -197,7 +215,9 @@ export default function Approve({ payeeId, amountMinor, speak, listen, onClose, 
       requestId: cur.requestId,
       proof: { method: "passkey", challenge: cur.challenge, response },
     });
+    reportEvent({ event: "approve_action", action: "fingerprint", outcome: r.ok ? "ok" : "fail", ms: Math.round(performance.now() - tF) });
     if (r.ok) {
+      paymentEnd("paid", r.receipt.simulated);
       req.current = null;
       setReceipt(r.receipt);
       setApprovedBy("fingerprint");
@@ -210,6 +230,7 @@ export default function Approve({ payeeId, amountMinor, speak, listen, onClose, 
       req.current = { ...cur, challenge: r.challenge };
       setPhase("pin");
     } else {
+      paymentEnd("failed");
       req.current = null;
       setPhase("stopped");
     }
@@ -251,6 +272,7 @@ export default function Approve({ payeeId, amountMinor, speak, listen, onClose, 
   useEffect(() => {
     if (started.current) return;
     started.current = true;
+    t0.current = performance.now();
     void begin();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -364,7 +386,7 @@ export default function Approve({ payeeId, amountMinor, speak, listen, onClose, 
             <button type="button" className="btn primary" onClick={() => void connectWallet()}>
               Connect wallet
             </button>
-            <button type="button" className="btn quiet" onClick={() => onClose("stopped")}>
+            <button type="button" className="btn quiet" onClick={() => (paymentEnd("stopped"), onClose("stopped"))}>
               Not now
             </button>
           </>

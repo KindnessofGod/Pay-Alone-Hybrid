@@ -230,7 +230,7 @@ describe("runLive", () => {
     const s: LiveSessionLike = { isClosed: false, receive: async function* () { throw new Error("quota exceeded"); }, sendAudioRealtime: async () => undefined, sendFunctionResponses: async () => undefined, close: async () => undefined };
     const deps = liveDeps();
     await runLive(s, deps).done;
-    expect(deps.onEnd).toHaveBeenCalledWith("error", "quota");
+    expect(deps.onEnd).toHaveBeenCalledWith("error", "quota", { reason: "Error quota exceeded", closeCode: undefined });
   });
   it("stop() closes the session once", async () => {
     const { s } = mockSession([]);
@@ -241,5 +241,28 @@ describe("runLive", () => {
     await c.done;
     expect(deps.onEnd).toHaveBeenCalledTimes(1);
     expect(deps.onEnd).toHaveBeenCalledWith("ended", "stopped");
+  });
+});
+
+describe("live error detail for the step log (no digits, no free text)", () => {
+  it("sanitizeReason keeps name and message, removes every digit, keeps only letters, spaces and . : _ -, max 100", async () => {
+    const { sanitizeReason } = await import("./live");
+    const e = new Error("WebSocket 1006 closed (code=4001) at wss://x.y/z?key=abc123");
+    e.name = "NetworkError";
+    const r = sanitizeReason(e);
+    expect(r).not.toMatch(/\d/);
+    expect(r).toMatch(/^[A-Za-z .:_-]+$/);
+    expect(r.startsWith("NetworkError")).toBe(true);
+    expect(sanitizeReason(new Error("x".repeat(300))).length).toBe(100);
+    expect(sanitizeReason("my pin is 1234")).not.toMatch(/\d/);
+    expect(sanitizeReason(undefined)).toBe("undefined");
+  });
+  it("closeCodeOf reads an integer close code if the error carries one", async () => {
+    const { closeCodeOf } = await import("./live");
+    expect(closeCodeOf({ code: 1006 })).toBe(1006);
+    expect(closeCodeOf({ closeCode: 4001 })).toBe(4001);
+    expect(closeCodeOf({ code: "1006" })).toBeUndefined();
+    expect(closeCodeOf(new Error("x"))).toBeUndefined();
+    expect(closeCodeOf({ code: 99999 })).toBeUndefined();
   });
 });

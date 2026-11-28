@@ -15,6 +15,9 @@ export interface EventView {
   outcome?: string;
   reason?: string;
   receiptId?: string;
+  t?: number;
+  sid?: string;
+  [k: string]: unknown;
 }
 
 export const badgeOf = (r: Pick<ReceiptView, "simulated">) => (r.simulated ? "SIMULATED" : "REAL");
@@ -46,4 +49,14 @@ const OUTCOME_WORDS: Record<string, string> = { ok: "ok", fail: "failed", connec
 export function activityLine(e: EventView, locale?: string): string {
   const o = e.outcome ? (OUTCOME_WORDS[e.outcome] ?? e.outcome) : "";
   return `${when(e.at, locale)}: ${EVENT_WORDS[e.event] ?? e.event}${o ? `, ${o}` : ""}${e.reason ? ` (${e.reason.replace(/_/g, " ")})` : ""}`;
+}
+
+/** Printed after the event name, in this order. Anything else on a saved row is never shown. */
+const DEBUG_KEYS = ["reason", "code", "where", "method", "method_offered", "action", "state", "speech", "mode", "choice", "tab", "index", "kind", "source", "engine", "shown", "ok", "simulated", "guarded", "cloud_raced", "chars", "count", "ms", "voice", "asset"];
+
+/** One saved step for the debug list: t (ms since page load), event, outcome and the whitelisted fields. */
+export function debugLine(e: EventView, locale?: string): string {
+  const head = typeof e.t === "number" ? `t=${e.t}` : when(e.at, locale);
+  const parts = DEBUG_KEYS.filter((k) => e[k] !== undefined).map((k) => `${k}=${String(e[k])}`);
+  return [head, e.event, e.outcome, ...parts].filter(Boolean).join(" ");
 }

@@ -7,7 +7,7 @@ import { recentAudit, type AuditRecord } from "./audit";
 import type { Receipt } from "./payflow";
 
 export const HISTORY_RECEIPTS = 20;
-export const HISTORY_EVENTS = 30;
+export const HISTORY_EVENTS = 50;
 
 export interface ReceiptRow {
   id: string;

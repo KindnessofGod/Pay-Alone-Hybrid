@@ -7,6 +7,7 @@ import { getToken, initializeAppCheck, ReCaptchaEnterpriseProvider, ReCaptchaV3P
 import { getAI, GoogleAIBackend, type AI } from "firebase/ai";
 import { fetchAndActivate, getRemoteConfig, getValue } from "firebase/remote-config";
 import type { Policy } from "../hybrid/understand";
+import { createEventQueue, makeSid } from "../ui/eventqueue";
 
 let app: FirebaseApp | undefined;
 let ai: AI | undefined;
@@ -76,7 +77,7 @@ async function appCheckToken(ac: AppCheck): Promise<string> {
  * Calls one of our payment API routes as the signed-in (anonymous) Firebase user.
  * The server reads the user id from the verified token, never from the body.
  */
-export async function api<T = Record<string, unknown>>(path: string, body: unknown, opts: { signIn?: boolean } = {}): Promise<T & { ok: boolean; reason?: string }> {
+export async function api<T = Record<string, unknown>>(path: string, body: unknown, opts: { signIn?: boolean; keepalive?: boolean } = {}): Promise<T & { ok: boolean; reason?: string }> {
   const { connectAuthEmulator, getAuth, signInAnonymously } = await import("firebase/auth");
   const auth = getAuth(firebaseApp());
   const emu = process.env.NEXT_PUBLIC_AUTH_EMULATOR; // local tests only, e.g. http://127.0.0.1:9099
@@ -95,6 +96,7 @@ export async function api<T = Record<string, unknown>>(path: string, body: unkno
       ...(appCheck ? { "x-firebase-appcheck": await appCheckToken(appCheck) } : {}),
     },
     body: JSON.stringify(body),
+    ...(opts.keepalive ? { keepalive: true } : {}),
   });
   try {
     return await res.json();
@@ -103,11 +105,35 @@ export async function api<T = Record<string, unknown>>(path: string, body: unkno
   }
 }
 
+let queue: ReturnType<typeof createEventQueue> | null = null;
+
+/** One queue per page load: events are batched and sent every 2 s, at 20 events, or when the page is hidden. */
+function eventQueue() {
+  if (queue) return queue;
+  queue = createEventQueue({
+    send: (events, o) => void api("/api/audit", { events }, { signIn: o.signIn, keepalive: o.unloading }).catch(() => undefined),
+    schedule: (fn, ms) => setTimeout(fn, ms),
+    cancel: (h) => clearTimeout(h as ReturnType<typeof setTimeout>),
+    now: () => performance.now(),
+    sid: makeSid(),
+  });
+  // Best effort on leaving: a keepalive fetch (sendBeacon cannot carry the sign-in header).
+  const leave = () => queue?.flush(true);
+  window.addEventListener("pagehide", leave);
+  document.addEventListener("visibilitychange", () => document.visibilityState === "hidden" && leave());
+  return queue;
+}
+
 /**
  * Tells the server a step that only the browser can see (see server/clientaudit.ts). Fire and forget:
- * it never waits, never throws, and sends only small fixed fields, never what the person said.
+ * it never waits, never throws, and sends only small fixed fields, never what the person said or typed.
+ * Events are stamped with a per-page-load session id and ms since page load, then sent in batches.
  */
 export function reportEvent(fields: Record<string, string | number | boolean>, opts: { signIn?: boolean } = {}): void {
   if (!firebaseConfigured()) return;
-  void api("/api/audit", fields, opts).catch(() => undefined);
+  try {
+    eventQueue().push(fields, opts);
+  } catch {
+    // logging never breaks the app
+  }
 }
