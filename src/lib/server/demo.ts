@@ -18,7 +18,7 @@ export const isDemoShopId = (id: string) => id.startsWith(DEMO_SHOP_PREFIX);
 const WEEK_MS = 7 * 86_400_000;
 
 /**
- * True only when the call came from our own /demo page (same-origin Referer) and demo mode is not switched off
+ * True only when the call came from our own /demo page or its shop frame /shop?demo=1 (same-origin Referer) and demo mode is not switched off
  * (DEMO_MODE=0). The Referer is a soft check: the real protection is that demo mode relaxes only the self-request
  * rule, and a payment still needs the person's own verified approval.
  */
@@ -28,7 +28,10 @@ export function isDemoContext(reqUrl: string, referer: string | null, env: Recor
     const r = new URL(referer);
     const self = new URL(reqUrl);
     const sameOrigin = r.origin === self.origin || allowedOrigins(env).includes(r.origin);
-    return sameOrigin && (r.pathname === "/demo" || r.pathname === "/demo/");
+    const demoPage = r.pathname === "/demo" || r.pathname === "/demo/";
+    // The shop app inside the /demo frame loads /shop?embed=1&demo=1.
+    const demoShop = (r.pathname === "/shop" || r.pathname === "/shop/") && r.searchParams.get("demo") === "1";
+    return sameOrigin && (demoPage || demoShop);
   } catch {
     return false;
   }

@@ -1,126 +1,193 @@
-// Presentational pieces of the /demo page. No data or logic of their own: page.tsx passes everything in, and
-// /design-preview passes fixed sample props (the animation can be frozen at a moment with `freezeMs`).
-import type { CSSProperties, ReactNode } from "react";
-import Link from "next/link";
-import type { DemoStage } from "@/lib/ui/demoflow";
+"use client";
+// /demo: the real customer app on an iPad and the real shop app on an iPhone, side by side. The page itself
+// speaks nothing and approves nothing; it only watches the shop frame say "paid" (same origin postMessage) and
+// shows that moment as a pill crossing the line. The amount comes from the shop frame, which got it from the server.
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useSearchParams } from "next/navigation";
+import { addPaid, fitScale, formatNairaMinor, parseDemoMessage } from "@/lib/ui/demoframes";
 import "./demo.css";
 
-export function DemoTopBar({ muted, onMute }: { muted: boolean; onMute?: () => void }) {
-  return (
-    <header className="dm-top">
-      <div className="dm-brand">
-        <span className="mark" aria-hidden="true">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3" /></svg>
-        </span>
-        <h1 style={{ fontSize: "inherit", fontWeight: 700 }}>Pay Alone</h1>
-        <span className="dm-dot" aria-hidden="true">·</span>
-        <span>Judge demo</span>
-        <span className="dm-dot" aria-hidden="true">·</span>
-        <span className="dm-test">Test money only</span>
-      </div>
-      <div className="dm-actions">
-        <button type="button" aria-pressed={muted} onClick={onMute}>{muted ? "🔇 Voice is muted" : "🔊 Mute voice"}</button>
-        <Link href="/">← Back to the main app</Link>
-      </div>
-      <p className="dm-explain">One screen, two people: the shop asks, the customer approves with a PIN or fingerprint, and you watch the money move. Nothing is paid until the customer approves.</p>
-    </header>
-  );
+const IPAD = { w: 856, h: 1216 };
+const PHONE = { w: 422, h: 894 };
+const FLIGHT_MS = 1200;
+
+function useBox() {
+  const ref = useRef<HTMLDivElement>(null);
+  const [box, setBox] = useState({ w: 0, h: 0, stacked: false });
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const measure = () => setBox({ w: el.clientWidth, h: el.clientHeight, stacked: window.matchMedia("(max-width: 999px)").matches });
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    window.addEventListener("resize", measure);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, []);
+  return [ref, box] as const;
 }
 
-export function DemoWallet({ title, big, lines, address, fine, bump = false, tag = "Test money" }: { title: string; big: string; lines?: string[]; address: string; fine: string; bump?: boolean; tag?: string }) {
+function Fit({ native, box, children }: { native: { w: number; h: number }; box: { w: number; h: number; stacked: boolean }; children: ReactNode }) {
+  const s = box.w ? fitScale({ w: box.w, h: box.stacked ? Infinity : box.h }, native) : 0.05;
   return (
-    <section className={`dm-wallet${bump ? " dm-bump" : ""}`} aria-label={title}>
-      <p className="dm-wl"><span>{title}</span><span className="dm-tag">{tag}</span></p>
-      <p className="dm-big" aria-live="polite">{big}</p>
-      {lines?.map((l) => (
-        <p key={l} className="dm-line">{l}</p>
-      ))}
-      <p className="dm-addr">{address}</p>
-      <p className="dm-fine">{fine}</p>
-    </section>
-  );
-}
-
-export function DemoHalf({ side, title, persona, children }: { side: "customer" | "shop"; title: string; persona: string; children: ReactNode }) {
-  return (
-    <section className={`dm-half dm-${side}`} aria-label={side === "customer" ? "Customer side" : "Shop side"}>
-      <div className="dm-who">
-        <span className="dm-role">{side === "customer" ? "Customer" : "Shop"}</span>
+    <div className="dm-fit" style={{ width: native.w * s, height: native.h * s }}>
+      <div className="dm-dev-wrap" style={{ transform: `scale(${s})`, transformOrigin: "0 0", width: native.w, height: native.h, position: "absolute", left: 0, top: 0 }}>
+        {children}
       </div>
-      <h2>{title}</h2>
-      <p className="dm-persona">{persona}</p>
-      {children}
-    </section>
-  );
-}
-
-/**
- * The page: customer, the lane between them, and the shop. On a wide screen the customer is on the left and the shop
- * on the right; on a phone the shop is on top and the customer below. The token travels only while stage is "moving".
- */
-export function DemoStageView({ stage, token, screenReader, customer, shop, freezeMs }: { stage: DemoStage; token?: string; screenReader?: string; customer: ReactNode; shop: ReactNode; freezeMs?: number }) {
-  const frozen: CSSProperties | undefined = freezeMs === undefined ? undefined : { animationPlayState: "paused", animationDelay: `-${freezeMs}ms` };
-  const token_ = stage === "moving" && token && (
-    <div className="dm-token" style={frozen}>
-      <span>{token.replace(/ →$/, "")}</span>
-      <span className="dm-arrow">→</span>
-    </div>
-  );
-  return (
-    <div className="dm-stage" data-stage={stage}>
-      {/* Wide screens: a band above both cards, so the token never covers a card. */}
-      <div className="dm-band" aria-hidden="true">
-        <span className="dm-bandlabel">Money moves from the customer to the shop</span>
-        {token_}
-      </div>
-      {customer}
-      <div className="dm-lane" aria-hidden="true">
-        <div className="dm-laneline" />
-        <span className="dm-lanelabel">money</span>
-        {token_}
-      </div>
-      {shop}
-      <p className="vh" role="status" aria-live="polite">{screenReader ?? ""}</p>
     </div>
   );
 }
 
-export function DemoShopForm(p: {
-  shopName: string;
-  code: string;
-  amount: string;
-  note: string;
-  error?: string;
-  busy?: boolean;
-  onShopName?: (v: string) => void;
-  onCode?: (v: string) => void;
-  onAmount?: (v: string) => void;
-  onNote?: (v: string) => void;
-  onAsk?: () => void;
-}) {
-  return (
-    <form
-      className="card shopform"
-      onSubmit={(e) => {
-        e.preventDefault();
-        p.onAsk?.();
-      }}
-    >
-      <h2>Ask the customer to pay</h2>
-      <label htmlFor="dm-shop-name">Shop name</label>
-      <input id="dm-shop-name" className="field" autoComplete="organization" maxLength={40} value={p.shopName} onChange={(e) => p.onShopName?.(e.target.value)} placeholder="Mama Put" />
-      <label htmlFor="dm-shop-code">Customer&apos;s pay code (filled in for this demo)</label>
-      <input id="dm-shop-code" className="field big" inputMode="numeric" autoComplete="off" maxLength={9} value={p.code} onChange={(e) => p.onCode?.(e.target.value)} placeholder="47 29 13" />
-      <label htmlFor="dm-shop-amount">Amount (₦)</label>
-      <input id="dm-shop-amount" className="field big" inputMode="decimal" autoComplete="off" value={p.amount} onChange={(e) => p.onAmount?.(e.target.value)} placeholder="2,000" />
-      <label htmlFor="dm-shop-note">What for (optional)</label>
-      <input id="dm-shop-note" className="field" maxLength={60} value={p.note} onChange={(e) => p.onNote?.(e.target.value)} placeholder="Rice and stew" />
-      {p.error && <p className="shoperr" role="alert">{p.error}</p>}
-      <button type="submit" className="btn primary" disabled={p.busy}>{p.busy ? "Sending…" : "Ask for payment"}</button>
-    </form>
-  );
-}
+export default function DemoView() {
+  const params = useSearchParams();
+  // Dev only: ?mock=1 shows fixed sample screens in the frames. It never exists in a production build.
+  const mock = process.env.NODE_ENV !== "production" && params.get("mock") === "1";
+  const mockState = params.get("state") ?? "idle";
+  const srcCustomer = mock ? `/demo-mock?side=customer&state=${encodeURIComponent(mockState)}&embed=1` : "/?embed=1";
+  const srcShop = mock ? `/demo-mock?side=shop&state=${encodeURIComponent(mockState)}&embed=1` : "/shop?embed=1&demo=1";
 
-export function WaitingForRequest() {
-  return <p className="dm-idle">No payment request yet. When the shop asks, it appears here and the customer hears it.</p>;
+  const [gen, setGen] = useState(0);
+  const [muted, setMuted] = useState(false);
+  const [sent, setSent] = useState({ total: "0", refs: [] as string[] });
+  const [recv, setRecv] = useState({ total: "0", refs: [] as string[] });
+  const [shown, setShown] = useState(false);
+  const [flight, setFlight] = useState<{ id: number; amountMinor: string; ref: string } | null>(null);
+  const queue = useRef<{ amountMinor: string; ref: string }[]>([]);
+  const flying = useRef(false);
+  const seen = useRef(new Set<string>());
+  const flightId = useRef(0);
+
+  const customerFrame = useRef<HTMLIFrameElement>(null);
+  const shopFrame = useRef<HTMLIFrameElement>(null);
+  const ipadScreen = useRef<HTMLDivElement>(null);
+  const phoneScreen = useRef<HTMLDivElement>(null);
+  const pill = useRef<HTMLDivElement>(null);
+  const [leftRef, leftBox] = useBox();
+  const [rightRef, rightBox] = useBox();
+
+  const postMute = useCallback((on: boolean) => {
+    for (const f of [customerFrame.current, shopFrame.current]) f?.contentWindow?.postMessage({ type: "payalone-demo", event: "mute", on }, window.location.origin);
+  }, []);
+  const toggleMute = () => {
+    const next = !muted;
+    setMuted(next);
+    postMute(next);
+  };
+  const onLoad = () => {
+    if (muted) postMute(true);
+  };
+
+  const startFlight = useCallback(() => {
+    if (flying.current) return;
+    const next = queue.current.shift();
+    if (!next) return;
+    flying.current = true;
+    setFlight({ id: ++flightId.current, ...next });
+  }, []);
+
+  // The shop frame says "paid". Check origin and shape, ignore a payment already seen, then fly the pill.
+  useEffect(() => {
+    const onMsg = (e: MessageEvent) => {
+      const m = parseDemoMessage(e.data, e.origin, window.location.origin);
+      if (!m) return;
+      const key = m.ref || `${m.amountMinor}@${Date.now()}`;
+      if (m.ref) {
+        if (seen.current.has(key)) return;
+        seen.current.add(key);
+      }
+      queue.current.push({ amountMinor: m.amountMinor, ref: m.ref });
+      startFlight();
+    };
+    window.addEventListener("message", onMsg);
+    return () => window.removeEventListener("message", onMsg);
+  }, [startFlight]);
+
+  // Run the animation when a flight starts; update the counters when it lands.
+  useEffect(() => {
+    const el = pill.current;
+    if (!flight || !el) return;
+    const a = ipadScreen.current?.getBoundingClientRect();
+    const b = phoneScreen.current?.getBoundingClientRect();
+    const stacked = window.matchMedia("(max-width: 999px)").matches;
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const fin = () => {
+      setSent((s) => addPaid(s, flight));
+      setRecv((s) => addPaid(s, flight));
+      setShown(true);
+      setFlight(null);
+      flying.current = false;
+      startFlight();
+    };
+    if (!a || !b) return fin();
+    const from = stacked ? { x: a.left + a.width / 2, y: a.top + 40 } : { x: a.right - 20, y: a.top + a.height / 2 };
+    const to = stacked ? { x: b.left + b.width / 2, y: b.bottom - 120 } : { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+    const at = (p: { x: number; y: number }) => `translate(${p.x}px, ${p.y}px) translate(-50%, -50%)`;
+    const anim = reduce
+      ? el.animate([{ transform: at(to), opacity: 0 }, { transform: at(to), opacity: 1, offset: 0.3 }, { transform: at(to), opacity: 1, offset: 0.8 }, { transform: at(to), opacity: 0 }], { duration: FLIGHT_MS, easing: "ease-in-out", fill: "forwards" })
+      : el.animate([{ transform: at(from), opacity: 0 }, { transform: at(from), opacity: 1, offset: 0.08 }, { transform: at(to), opacity: 1, offset: 0.9 }, { transform: at(to), opacity: 0 }], { duration: FLIGHT_MS, easing: "ease-in-out", fill: "forwards" });
+    anim.onfinish = fin;
+    return () => {
+      anim.onfinish = null;
+      anim.cancel();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [flight?.id]);
+
+  return (
+    <div className="dm">
+      <h1 className="vh">Pay Alone judge demo</h1>
+      <header className="dm-top">
+        <div className="dm-brand">
+          <span className="dm-word">Pay alone.</span>
+          <span className="dm-chip">Test money</span>
+        </div>
+        <div className="dm-acts">
+          <button type="button" aria-pressed={muted} onClick={toggleMute}>{muted ? "Unmute" : "Mute"}</button>
+          <button type="button" onClick={() => setGen((g) => g + 1)}>Start over</button>
+        </div>
+      </header>
+      <div className="dm-body">
+        <section className="dm-half dm-left" aria-label="Customer">
+          <p className="dm-label">Customer · iPad</p>
+          <div className="dm-stage" ref={leftRef}>
+            <Fit native={IPAD} box={leftBox}>
+              <div className="dm-dev dm-ipad">
+                <span className="dm-btn t" aria-hidden="true" />
+                <div className="dm-scr" ref={ipadScreen}>
+                  <iframe key={`c${gen}`} ref={customerFrame} src={srcCustomer} title="Customer app on an iPad" width={820} height={1180} allow="microphone; publickey-credentials-get *; publickey-credentials-create *" onLoad={onLoad} />
+                </div>
+              </div>
+            </Fit>
+          </div>
+          <p className="dm-count" style={{ visibility: shown ? "visible" : "hidden" }} aria-live="polite">Sent {formatNairaMinor(sent.total)}</p>
+        </section>
+        <div className="dm-rule" aria-hidden="true" />
+        <section className="dm-half dm-right" aria-label="Shop">
+          <p className="dm-label">Shop · iPhone</p>
+          <div className="dm-stage" ref={rightRef}>
+            <Fit native={PHONE} box={rightBox}>
+              <div className="dm-dev dm-phone">
+                {["a", "b", "c", "d"].map((k) => (
+                  <span key={k} className={`dm-btn ${k}`} aria-hidden="true" />
+                ))}
+                <div className="dm-scr" ref={phoneScreen}>
+                  <iframe key={`s${gen}`} ref={shopFrame} src={srcShop} title="Shop app on an iPhone" width={402} height={874} onLoad={onLoad} />
+                  <span className="dm-island" aria-hidden="true" />
+                </div>
+              </div>
+            </Fit>
+          </div>
+          <p className="dm-count" style={{ visibility: shown ? "visible" : "hidden" }} aria-live="polite">Received {formatNairaMinor(recv.total)}</p>
+        </section>
+      </div>
+      {flight && (
+        <div className="dm-pill" ref={pill} aria-hidden="true">
+          {formatNairaMinor(flight.amountMinor)} {typeof window !== "undefined" && window.matchMedia("(max-width: 999px)").matches ? "↑" : "→"}
+        </div>
+      )}
+    </div>
+  );
 }

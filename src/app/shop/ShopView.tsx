@@ -27,6 +27,7 @@ export function ShopForm(p: {
   note: string;
   error?: string;
   busy?: boolean;
+  hideNote?: boolean;
   onShopName?: (v: string) => void;
   onCode?: (v: string) => void;
   onAmount?: (v: string) => void;
@@ -52,9 +53,9 @@ export function ShopForm(p: {
       <input id="shop-note" className="field" maxLength={60} value={p.note} onChange={(e) => p.onNote?.(e.target.value)} placeholder="Rice and stew" />
       {p.error && <p className="shoperr" role="alert">{p.error}</p>}
       <button type="submit" className="btn primary" disabled={p.busy}>{p.busy ? "Sending…" : "Ask for payment"}</button>
-      <p className="note">
+      {!p.hideNote && <p className="note">
         <b>Test shop wallet.</b> In this demo every shop is paid into the app&apos;s one shared test receiving wallet, whatever the shop name. Test money only. Open this page on a different device or browser from the customer&apos;s.
-      </p>
+      </p>}
     </form>
   );
 }

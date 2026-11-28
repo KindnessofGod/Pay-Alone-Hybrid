@@ -12,6 +12,15 @@ describe("isDemoContext (the /demo page only)", () => {
     expect(isDemoContext(url, "https://usepayalone.tech/demo", {})).toBe(true);
     expect(isDemoContext(url, "https://usepayalone.tech/demo?x=1#top", {})).toBe(true);
   });
+  it("accepts the demo shop iframe (/shop with demo=1), same origin only", () => {
+    expect(isDemoContext(url, "https://usepayalone.tech/shop?embed=1&demo=1", {})).toBe(true);
+    expect(isDemoContext(url, "https://usepayalone.tech/shop?demo=1", {})).toBe(true);
+    expect(isDemoContext(url, "https://usepayalone.tech/shop?embed=1", {})).toBe(false);
+    expect(isDemoContext(url, "https://usepayalone.tech/shop?demo=0", {})).toBe(false);
+    expect(isDemoContext(url, "https://usepayalone.tech/shop?x=demo=1", {})).toBe(false);
+    expect(isDemoContext(url, "https://evil.example/shop?demo=1", {})).toBe(false);
+    expect(isDemoContext(url, "https://usepayalone.tech/shop?demo=1", { DEMO_MODE: "0" })).toBe(false);
+  });
   it("refuses other pages, other origins, a missing Referer, and when switched off", () => {
     expect(isDemoContext(url, "https://usepayalone.tech/shop", {})).toBe(false);
     expect(isDemoContext(url, "https://usepayalone.tech/demonstration", {})).toBe(false);

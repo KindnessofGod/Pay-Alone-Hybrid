@@ -10,6 +10,7 @@ import { readCloudOptIn, writeCloudOptIn } from "@/lib/hybrid/speechoptin";
 import { api, firebaseApp, firebaseConfigured, remoteSettings, reportEvent } from "@/lib/firebase/client";
 import { speechMode, type SpeechStatus } from "@/lib/hybrid/speechpolicy";
 import { chatEngines, firebaseEngines, lastCall, prepareOnDevice, warmUpOnDevice } from "@/lib/firebase/engines";
+import { isEmbedMuted } from "@/lib/embed";
 import { DEMO_CONTACTS, CONTACT_PRONUNCIATION } from "@/lib/demo/contacts";
 import { speaker } from "@/lib/hybrid/ttsBrowser";
 import type { TtsStatus } from "@/lib/hybrid/tts";
@@ -153,6 +154,7 @@ export default function Home() {
   // word that it said exactly our template). If it said anything else, or there is no Live session, our own voice speaks.
   const liveRef = useRef<{ active: boolean; speakExact: (t: string) => Promise<"spoken" | "mismatch" | "failed"> } | null>(null);
   const speak = useCallback(async (t: string) => {
+    if (isEmbedMuted()) return;
     const t0 = performance.now();
     const L = liveRef.current;
     if (L?.active && speakableForLive(t)) {

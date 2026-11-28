@@ -5,7 +5,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, firebaseConfigured } from "@/lib/firebase/client";
 import { parseMajor } from "@/lib/money";
-import { shopStatusView } from "@/lib/ui/requestprompt";
+import { isEmbedMuted } from "@/lib/embed";
+import { formatPayCode, shopStatusView } from "@/lib/ui/requestprompt";
 import { ShopForm, ShopShell, ShopStatus } from "./ShopView";
 
 const NAME_KEY = "payalone.shopName";
@@ -36,6 +37,7 @@ interface Live {
 }
 
 function speakNow(text: string) {
+  if (isEmbedMuted()) return;
   try {
     const u = new SpeechSynthesisUtterance(text);
     u.lang = "en-NG";
@@ -55,6 +57,9 @@ export default function ShopPage() {
   const [busy, setBusy] = useState(false);
   const [live, setLive] = useState<Live | null>(null);
   const spoken = useRef("");
+  // /shop?embed=1&demo=1 is the shop app inside the /demo iPhone frame: it asks the customer's own pay code.
+  const [demo, setDemo] = useState(false);
+  const codeTouched = useRef(false);
 
   useEffect(() => {
     try {
@@ -62,6 +67,21 @@ export default function ShopPage() {
     } catch {
       /* no storage: the name is typed each time */
     }
+    const q = new URLSearchParams(window.location.search);
+    if (q.get("demo") !== "1" || !firebaseConfigured()) return;
+    setDemo(true);
+    setAmount("2000");
+    setShopName((n) => n || "Mama Put");
+    let off = false;
+    api<{ code: string }>("/api/paycode", {})
+      .then((r) => {
+        if (off || !r.ok || !/^\d{6}$/.test(r.code) || codeTouched.current) return;
+        setCode(formatPayCode(r.code));
+      })
+      .catch(() => undefined);
+    return () => {
+      off = true;
+    };
   }, []);
   const changeName = (v: string) => {
     setShopName(v);
@@ -79,7 +99,7 @@ export default function ShopPage() {
     if (!firebaseConfigured()) return setError("The app is not connected to its server here.");
     setBusy(true);
     try {
-      const r = await api<{ request: { id: string; ref: string } }>("/api/shop/ask", { code, amountMinor: minor, shopName, note: note || undefined });
+      const r = await api<{ request: { id: string; ref: string } }>("/api/shop/ask", { ...(demo ? { demo: true } : {}), code, amountMinor: minor, shopName, note: note || undefined });
       if (!r.ok) return setError(ERRORS[r.reason ?? ""] ?? "Something went wrong. Nothing was sent. Please try again.");
       spoken.current = "";
       setLive({ id: r.request.id, ref: r.request.ref, shopName: shopName.trim(), amount: { value: minor, assetCode: "NGN", assetScale: 2 }, status: "pending" });
@@ -120,6 +140,15 @@ export default function ShopPage() {
     }
   }, [view?.speech, live]);
 
+  // Tell the /demo page (same origin only) that the server says paid, so it can show the money moving.
+  const livePaid = live?.status === "paid";
+  const liveAmount = live?.amount.value;
+  const liveRef = live?.ref;
+  useEffect(() => {
+    if (!livePaid || !liveAmount || window.parent === window) return;
+    window.parent.postMessage({ type: "payalone-demo", event: "paid", amountMinor: liveAmount, ref: liveRef ?? "" }, window.location.origin);
+  }, [livePaid, liveAmount, liveRef]);
+
   const again = useCallback(() => {
     setLive(null);
     setCode("");
@@ -132,7 +161,10 @@ export default function ShopPage() {
       {view && live ? (
         <ShopStatus tone={view.tone} headline={view.headline} sub={view.sub} shop={live.shopName} onNew={again} />
       ) : (
-        <ShopForm shopName={shopName} code={code} amount={amount} note={note} error={error} busy={busy} onShopName={changeName} onCode={setCode} onAmount={setAmount} onNote={setNote} onAsk={() => void ask()} />
+        <ShopForm shopName={shopName} code={code} amount={amount} note={note} error={error} busy={busy} hideNote={demo} onShopName={changeName} onCode={(v) => {
+          codeTouched.current = true;
+          setCode(v);
+        }} onAmount={setAmount} onNote={setNote} onAsk={() => void ask()} />
       )}
     </ShopShell>
   );

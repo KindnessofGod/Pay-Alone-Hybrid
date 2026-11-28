@@ -4,6 +4,7 @@
 "use client";
 import { failAfter, orAfter } from "./timeout";
 import { speaker } from "./ttsBrowser";
+import { isEmbedMuted } from "../embed";
 
 type Rec = {
   lang: string;
@@ -197,6 +198,7 @@ export function listenOnce(opts: { lang?: string; local: boolean; maxMs?: number
  * voice at once. Resolves when speech ends, or after the time limit; never throws.
  */
 export function say(text: string): Promise<void> {
+  if (isEmbedMuted()) return Promise.resolve(); // muted by the /demo page
   // The browser voice can stall; the model has its own limit (tts.ts). Never wait longer than speech could take.
   const limit = 3_000 + text.length * 120 + 8_000;
   return orAfter(speaker.speak(text), limit, undefined);
