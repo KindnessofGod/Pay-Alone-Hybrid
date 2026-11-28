@@ -3,6 +3,7 @@ import { customerWalletLines, shopWalletLines } from "./demowallet";
 
 const ngn = (value: string, count: number) => ({ assetCode: "NGN", assetScale: 2, value, count });
 
+const cap = { value: "5000", assetCode: "USD", assetScale: 2 };
 describe("shop wallet lines", () => {
   it("counts payments, singular and plural", () => {
     expect(shopWalletLines([ngn("200000", 1)], null, false).received).toBe("Received on this page: ₦2,000.00 (1 payment)");
@@ -16,8 +17,10 @@ describe("shop wallet lines", () => {
     expect(shopWalletLines([], null, true).address).toMatch(/simulated/i);
   });
   it("has a big figure for the card", () => {
-    expect(shopWalletLines([ngn("200000", 1)], null, false).big).toBe("₦2,000.00");
-    expect(shopWalletLines([], null, false).big).toBe("nothing yet");
+    expect(shopWalletLines([ngn("200000", 1)], null, false).big).toBe("₦2,000.00 received");
+    expect(shopWalletLines([], null, false).big).toBe("Nothing received yet");
+    expect(customerWalletLines([ngn("200000", 1)], cap, null, false).big).toBe("₦2,000.00 sent this week");
+    expect(customerWalletLines([], cap, null, false).big).toBe("Nothing sent yet");
   });
   it("never says balance", () => {
     expect(JSON.stringify(shopWalletLines([ngn("1", 1)], "x", false))).not.toMatch(/balance/i);
@@ -25,7 +28,6 @@ describe("shop wallet lines", () => {
 });
 
 describe("customer wallet lines", () => {
-  const cap = { value: "5000", assetCode: "USD", assetScale: 2 };
   it("same currency as the limit: $X of $50 limit", () => {
     expect(customerWalletLines([{ assetCode: "USD", assetScale: 2, value: "150", count: 1 }], cap, null, false).sent).toBe("Sent this week: $1.50 of $50.00 limit");
   });

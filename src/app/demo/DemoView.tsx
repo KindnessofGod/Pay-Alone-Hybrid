@@ -60,18 +60,24 @@ export function DemoHalf({ side, title, persona, children }: { side: "customer" 
  */
 export function DemoStageView({ stage, token, screenReader, customer, shop, freezeMs }: { stage: DemoStage; token?: string; screenReader?: string; customer: ReactNode; shop: ReactNode; freezeMs?: number }) {
   const frozen: CSSProperties | undefined = freezeMs === undefined ? undefined : { animationPlayState: "paused", animationDelay: `-${freezeMs}ms` };
+  const token_ = stage === "moving" && token && (
+    <div className="dm-token" style={frozen}>
+      <span>{token.replace(/ →$/, "")}</span>
+      <span className="dm-arrow">→</span>
+    </div>
+  );
   return (
     <div className="dm-stage" data-stage={stage}>
+      {/* Wide screens: a band above both cards, so the token never covers a card. */}
+      <div className="dm-band" aria-hidden="true">
+        <span className="dm-bandlabel">Money moves from the customer to the shop</span>
+        {token_}
+      </div>
       {customer}
       <div className="dm-lane" aria-hidden="true">
         <div className="dm-laneline" />
         <span className="dm-lanelabel">money</span>
-        {stage === "moving" && token && (
-          <div className="dm-token" style={frozen}>
-            <span>{token.replace(/ →$/, "")}</span>
-            <span className="dm-arrow">→</span>
-          </div>
-        )}
+        {token_}
       </div>
       {shop}
       <p className="vh" role="status" aria-live="polite">{screenReader ?? ""}</p>
