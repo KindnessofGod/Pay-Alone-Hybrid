@@ -37,6 +37,6 @@ export function shopStatusView(status: "pending" | "paid" | "declined" | "expire
     case "expired":
       return { tone: "bad", headline: "Expired", sub: `Reference ${ref}. Nothing was paid. Ask again.` };
     default:
-      return { tone: "wait", headline: "Waiting for the customer…", sub: `Reference ${ref}` };
+      return { tone: "wait", headline: "Waiting for the customer…", sub: `${major} · Reference ${ref}` };
   }
 }

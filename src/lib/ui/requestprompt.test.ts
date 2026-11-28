@@ -48,7 +48,7 @@ describe("pay code on screen and in speech", () => {
 
 describe("shop page status", () => {
   it("waiting, paid, declined and expired each have words, never colour alone", () => {
-    expect(shopStatusView("pending", "31", amt)).toMatchObject({ tone: "wait", headline: "Waiting for the customer…", sub: "Reference 31" });
+    expect(shopStatusView("pending", "31", amt)).toMatchObject({ tone: "wait", headline: "Waiting for the customer…", sub: "₦2,000.00 · Reference 31" });
     const paid = shopStatusView("paid", "31", amt);
     expect(paid).toMatchObject({ tone: "good", headline: "PAID ₦2,000.00" });
     expect(paid.speech).toBe("Payment received, 2,000 naira, reference 31");
