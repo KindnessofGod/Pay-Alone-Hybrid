@@ -12,6 +12,7 @@
 import { spokenSecret, type SecretKind } from "./tripwire";
 import { redactForCloud } from "./redact";
 import { validContactName } from "./contacts";
+import { HEAD_START_MS, raceOnDeviceFirst } from "./race";
 import { crossCheck, type AiIntent, type CheckReason, type Contact, type Proposal } from "./crosscheck";
 
 export type Policy = "on_device_first" | "on_device_only" | "cloud_only" | "ai_off";
@@ -22,6 +23,10 @@ export interface Engines {
   /** Throws if the on-device model is unavailable. Returns parsed JSON (or raw text). */
   onDevice: (prompt: string) => Promise<unknown>;
   cloud: (prompt: string) => Promise<unknown>;
+  /** Under on_device_first, how long Nano is alone before the cloud is started too. Default 2500 ms. */
+  headStartMs?: number;
+  /** True while an earlier on-device call is still running (it cannot be cancelled). */
+  onDeviceBusy?: () => boolean;
 }
 
 export interface Context {
@@ -122,7 +127,7 @@ export async function understand(said: string, input: Context, engines: Engines)
     if (quick) return quick;
   }
 
-  let route = decideRoute(ctx.policy, ctx.deviceAvailable);
+  let route: Route | "done" = decideRoute(ctx.policy, ctx.deviceAvailable);
   let intent: AiIntent | null = null;
   let source: Source = "rules";
   let sentToCloud: string | undefined;
@@ -130,6 +135,50 @@ export async function understand(said: string, input: Context, engines: Engines)
   const skipped: string[] = [];
   if ((ctx.policy === "on_device_first" || ctx.policy === "on_device_only") && !ctx.deviceAvailable) skipped.push("on-device: Gemini Nano not available on this computer");
 
+  if (route === "on_device" && ctx.policy === "on_device_first" && engines.onDeviceBusy?.()) {
+    skipped.push("on-device: still busy with the last answer");
+    route = "cloud";
+  }
+  if (route === "on_device" && ctx.policy === "on_device_first") {
+    // Nano gets a head start; if it is slow the cloud (redacted) is started too and the first usable answer wins.
+    const r = redactForCloud(said, ctx.contacts.map((c) => c.name));
+    let cloudStarted = false;
+    const raced = await raceOnDeviceFirst<AiIntent>(
+      engines.onDevice(said).then(toIntent),
+      () => {
+        cloudStarted = true;
+        return engines.cloud(r.text).then(toIntent);
+      },
+      engines.headStartMs ?? HEAD_START_MS,
+    );
+    if (cloudStarted) sentToCloud = r.text; // sent, even if Nano won: the screen must say so
+    const note = (who: "on-device" | "online", o: typeof raced.device | typeof raced.cloud) => {
+      if (o === "pending" || o === "not_started") return;
+      skipped.push(o.ok ? `${who}: answer was not usable JSON` : `${who}: ${reason(o.error, said)}`);
+    };
+    if (raced.winner === "cloud") {
+      if (raced.device === "pending") skipped.push("on-device: slower than the head start, online answered first");
+      else note("on-device", raced.device);
+      intent = raced.value;
+      source = "cloud";
+      cloudContacts = r.contacts;
+      route = "done";
+    } else if (raced.winner === "on_device") {
+      intent = raced.value;
+      source = "on_device";
+      route = "done";
+    } else {
+      note("on-device", raced.device);
+      note("online", raced.cloud);
+      // Both answered but with nothing usable: unclear (as before), not a guess by rules.
+      const answered = (o: typeof raced.device | typeof raced.cloud) => o !== "pending" && o !== "not_started" && o.ok;
+      if (answered(raced.device) && answered(raced.cloud)) {
+        intent = null;
+        source = "cloud";
+        route = "done";
+      } else route = "none";
+    }
+  }
   if (route === "on_device") {
     try {
       intent = toIntent(await engines.onDevice(said));

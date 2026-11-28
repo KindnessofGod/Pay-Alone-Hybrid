@@ -193,3 +193,76 @@ describe("instant path: a clean command needs no AI (fast on CPU-only PCs)", () 
     expect(r.source).toBe("on_device");
   });
 });
+
+describe("understand(): on-device head start, then race the cloud", () => {
+  const later = (ms: number, v: unknown) => new Promise<unknown>((res, rej) => setTimeout(() => (v instanceof Error ? rej(v) : res(v)), ms));
+  const nano = { action: "send", amountMinor: 500000, payee: "Mama Ade" };
+  const cld = { action: "send", amountMinor: null, payee: "[CONTACT_1]" };
+  const ctx = (extra = {}) => ({ contacts, limitMinor, policy: "on_device_first" as const, deviceAvailable: true, ...extra });
+  const said = "send 5000 naira to Mama Ade";
+  const mk = (dev: () => Promise<unknown>, c: () => Promise<unknown>, extra: { headStartMs?: number; onDeviceBusy?: () => boolean } = {}) => ({ onDevice: vi.fn(dev), cloud: vi.fn(c), headStartMs: 15, ...extra });
+
+  it("Nano fast: on_device, no cloud call", async () => {
+    const e = mk(() => later(2, nano), () => later(1, cld), { headStartMs: 80 });
+    const r = await understand(said, ctx(), e);
+    expect(r).toMatchObject({ kind: "proposal", source: "on_device" });
+    expect(e.cloud).not.toHaveBeenCalled();
+    expect((r as { sentToCloud?: string }).sentToCloud).toBeUndefined();
+  });
+  it("Nano slow, cloud fast: cloud used, redacted text sent, digit-free note, contacts handled", async () => {
+    const e = mk(() => later(300, nano), () => later(2, cld));
+    const r = await understand(said, ctx(), e);
+    expect(r).toMatchObject({ kind: "proposal", source: "cloud" });
+    expect((e.cloud.mock.calls[0] as string[])[0]).not.toMatch(/Mama|Ade|5000/);
+    expect((r as { sentToCloud?: string }).sentToCloud).toBe((e.cloud.mock.calls[0] as string[])[0]);
+    expect(r.skipped?.join(" ")).toContain("slower than the head start");
+    for (const s of r.skipped ?? []) expect(s).not.toMatch(/\d/);
+    if (r.kind === "proposal") expect(r.proposal.payeeId).toBe("c1");
+  });
+  it("Nano slow but beats the cloud: on_device, cloud send still reported", async () => {
+    const e = mk(() => later(35, nano), () => later(300, cld));
+    const r = await understand(said, ctx(), e);
+    expect(r).toMatchObject({ kind: "proposal", source: "on_device" });
+    expect(e.cloud).toHaveBeenCalledTimes(1);
+    expect((r as { sentToCloud?: string }).sentToCloud).toBeTypeOf("string");
+  });
+  it("Nano throws fast: cloud at once", async () => {
+    const e = mk(() => later(1, new Error("no nano")), () => later(2, cld), { headStartMs: 5000 });
+    const r = await understand(said, ctx(), e);
+    expect(r).toMatchObject({ kind: "proposal", source: "cloud" });
+  });
+  it("Nano gives unusable JSON fast, cloud used", async () => {
+    const e = mk(() => later(1, "nonsense"), () => later(2, cld), { headStartMs: 5000 });
+    expect(await understand(said, ctx(), e)).toMatchObject({ source: "cloud" });
+  });
+  it("both fail: rules fallback as before", async () => {
+    const e = mk(() => later(20, new Error("a")), () => later(2, new Error("b")), { headStartMs: 5 });
+    const r = await understand(said, ctx(), e);
+    expect(r.source).toBe("rules");
+    expect(r.skipped?.length).toBeGreaterThanOrEqual(2);
+  });
+  it("on_device_only never calls the cloud", async () => {
+    const e = mk(() => later(40, nano), () => later(1, cld), { headStartMs: 5 });
+    const r = await understand(said, ctx({ policy: "on_device_only" }), e);
+    expect(r.source).toBe("on_device");
+    expect(e.cloud).not.toHaveBeenCalled();
+  });
+  it("queue busy: straight to the cloud", async () => {
+    const e = mk(() => later(1, nano), () => later(2, cld), { headStartMs: 5000, onDeviceBusy: () => true });
+    const r = await understand(said, ctx(), e);
+    expect(r.source).toBe("cloud");
+    expect(e.onDevice).not.toHaveBeenCalled();
+    expect(r.skipped).toEqual(["on-device: still busy with the last answer"]);
+  });
+  it("tripwire blocks before any call", async () => {
+    const e = mk(() => later(1, nano), () => later(1, cld));
+    const r = await understand("my pin is 4826", ctx(), e);
+    expect(r.kind).toBe("secret_spoken");
+    expect(e.onDevice).not.toHaveBeenCalled();
+    expect(e.cloud).not.toHaveBeenCalled();
+  });
+  it("the cross-check still applies to the cloud answer used", async () => {
+    const e = mk(() => later(300, nano), () => later(2, { action: "send", amountMinor: 999999999, payee: "[CONTACT_1]" }));
+    expect((await understand(said, ctx(), e)).kind).toBe("rejected");
+  });
+});
