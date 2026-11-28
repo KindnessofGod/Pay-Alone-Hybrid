@@ -1,7 +1,7 @@
 "use client";
 // The voice screen: header, wallet, conversation, and a sticky dock with the big mic. Everything is also
 // spoken, and works with a screen reader and with the keyboard only (Space to talk).
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { understand, type Policy, type Understood } from "@/lib/hybrid/understand";
 import type { Contact } from "@/lib/hybrid/crosscheck";
 import { nanoAvailability } from "@/lib/hybrid/device";
@@ -16,14 +16,31 @@ import { chatReply, type ChatTurn } from "@/lib/hybrid/chat";
 import { afterPayment, chatOnly, initialDialog, next as dialogNext, silence, type DialogState } from "@/lib/hybrid/dialog";
 import { spokenSecret } from "@/lib/hybrid/tripwire";
 import Approve from "./Approve";
-import { Bubble, Chip, Dock, Header, PinStopped, WalletCard, type Tab } from "./ui";
+import { Bubble, Chip, Dock, Header, PinStopped, PrivacyCard, WalletCard, type Tab } from "./ui";
 import History from "./History";
 import { takeResume, type Resume } from "@/lib/ui/resume";
 
 // SIMULATED test contacts until the saved-contacts screen exists (the server checks the same list).
 const CONTACTS: Contact[] = DEMO_CONTACTS.map((c) => ({ ...c }));
 
+// One layout per screen size. The wide layout (>= 1024px) puts the wallet in the header, the conversation on
+// the left, and the payment, receipts and privacy cards on the right. The phone layout is unchanged.
+const WIDE = "(min-width: 1024px)";
+function useWide() {
+  return useSyncExternalStore(
+    (cb) => {
+      const m = window.matchMedia(WIDE);
+      m.addEventListener("change", cb);
+      return () => m.removeEventListener("change", cb);
+    },
+    () => window.matchMedia(WIDE).matches,
+    () => false,
+  );
+}
+
 export default function Home() {
+  const wide = useWide();
+  const scrollRef = useRef<HTMLDivElement>(null);
   const [ready, setReady] = useState(false);
   const [nano, setNano] = useState("checking");
   const [speech, setSpeech] = useState<SpeechStatus | "checking">("checking");
@@ -329,26 +346,33 @@ export default function Home() {
   const hasResultDetails = Boolean(result && result.kind !== "secret_spoken" && (("sentToCloud" in result && result.sentToCloud !== undefined) || result.skipped?.length || (ms > 0 && result.source !== "rules")));
   const lastIsApp = turns.length > 0 && turns[turns.length - 1].who === "app";
 
-  return (
-    <div className="app">
-      <Header nano={nano} />
-      <div className="panel-body" role="tabpanel" id="panel-talk" aria-labelledby="tab-talk" hidden={tab !== "talk"}>
-        <WalletCard note={walletNote} connected={walletConnected} onConnect={firebaseConfigured() ? () => void connectWallet() : undefined}>
-          {resume && !approving && (
-            <button
-              type="button"
-              className="btn primary"
-              onClick={() => {
-                setApproving({ ...resume, key: Date.now() });
-                setResume(null);
-                setWalletNote("");
+  const approveEl = approving ? (
+            <Approve
+              key={approving.key}
+              payeeId={approving.payeeId}
+              amountMinor={approving.amountMinor}
+              speak={speak}
+              onPaid={() => setHistoryKey((k) => k + 1)}
+              listen={(() => {
+                const m = speechMode(speech === "checking" ? "none" : speech, cloudSpeech);
+                return m.mic ? () => listenOnce({ local: m.local }) : null;
+              })()}
+              onClose={(outcome) => {
+                stopListening(); // the approval card may still have the mic open for "no"
+                setApproving(null);
+                seq.current++; // anything still running from before no longer owns the screen
+                const my = seq.current;
+                const o = afterPayment(dialog.current, outcome);
+                dialog.current = o.state;
+                addTurn("app", o.say);
+                void speak(o.say).then(() => {
+                  if (my === seq.current && lastInput.current === "voice" && speechMode(speech === "checking" ? "none" : speech, cloudSpeech).mic) void talkRef.current(true);
+                });
               }}
-            >
-              Continue payment to {CONTACTS.find((c) => c.id === resume.payeeId)?.name ?? "your contact"}
-            </button>
-          )}
-        </WalletCard>
-        {turns.length === 0 && !approving && (
+            />
+  ) : null;
+  const welcomeEl =
+    turns.length === 0 && !approving ? (
           <section className="welcome" aria-label="Welcome">
             <p className="serif big">Say who you want to pay.</p>
             <p className="note">Or ask me anything.</p>
@@ -362,8 +386,40 @@ export default function Home() {
               ))}
             </ul>
           </section>
-        )}
-        <div aria-live="polite" className="chat">
+    ) : null;
+  const checkboxEl =
+    ready && speech !== "local" ? (
+          <p className="note">
+            <label>
+              <input type="checkbox" checked={cloudSpeech} onChange={(e) => setCloudSpeech(e.target.checked)} />
+              <span>Use online speech recognition. Your voice will be sent to Google. Never say a PIN.</span>
+            </label>
+          </p>
+    ) : null;
+  const resumeBtn = (
+    <>
+      {resume && !approving && (
+            <button
+              type="button"
+              className="btn primary"
+              onClick={() => {
+                setApproving({ ...resume, key: Date.now() });
+                setResume(null);
+                setWalletNote("");
+              }}
+            >
+              Continue payment to {CONTACTS.find((c) => c.id === resume.payeeId)?.name ?? "your contact"}
+            </button>
+          )}
+    </>
+  );
+  const walletEl = (compact: boolean) => (
+    <WalletCard compact={compact} note={compact ? undefined : walletNote} connected={walletConnected} onConnect={firebaseConfigured() ? () => void connectWallet() : undefined}>
+      {!compact && resumeBtn}
+    </WalletCard>
+  );
+  const chatEl = (
+    <div aria-live="polite" className="chat">
           {working && <p className="working">{working}</p>}
           {turns.length > 0 && (
             <ol className="chat" aria-label="Conversation">
@@ -392,40 +448,59 @@ export default function Home() {
               )}
             </ol>
           )}
-          {approving && (
-            <Approve
-              key={approving.key}
-              payeeId={approving.payeeId}
-              amountMinor={approving.amountMinor}
-              speak={speak}
-              onPaid={() => setHistoryKey((k) => k + 1)}
-              listen={(() => {
-                const m = speechMode(speech === "checking" ? "none" : speech, cloudSpeech);
-                return m.mic ? () => listenOnce({ local: m.local }) : null;
-              })()}
-              onClose={(outcome) => {
-                stopListening(); // the approval card may still have the mic open for "no"
-                setApproving(null);
-                seq.current++; // anything still running from before no longer owns the screen
-                const my = seq.current;
-                const o = afterPayment(dialog.current, outcome);
-                dialog.current = o.state;
-                addTurn("app", o.say);
-                void speak(o.say).then(() => {
-                  if (my === seq.current && lastInput.current === "voice" && speechMode(speech === "checking" ? "none" : speech, cloudSpeech).mic) void talkRef.current(true);
-                });
-              }}
-            />
-          )}
+          {!wide && approveEl}
+    </div>
+  );
+  const privacyFacts = [
+    { label: "Gemini Nano", value: nano },
+    { label: "Speech", value: speechWords },
+    { label: "Voice", value: voiceWords },
+    { label: "Policy", value: policy },
+    ...(!firebaseConfigured() ? [{ label: "Firebase", value: "not configured, plain rules only" }] : []),
+  ];
+
+  // Keep the newest message in view inside the conversation panel (wide layout only).
+  useEffect(() => {
+    if (wide && scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, [wide, turns, working, approving]);
+
+  if (wide) {
+    return (
+      <div className="app desk">
+        <Header nano={nano} right={walletEl(true)} />
+        <div className="grid">
+          <section className={`convo${turns.length === 0 && !approving ? " empty" : ""}`} aria-label="Conversation">
+            <div className="scroll" ref={scrollRef}>
+              {welcomeEl}
+              {chatEl}
+              {checkboxEl}
+            </div>
+            <Dock desk hint={hint} listening={listening} micLabel={micLabel} onMic={onMic} typed={typed} onTyped={setTyped} onSubmit={() => void submitTyped()} inputRef={inputBox} tab={tab} />
+          </section>
+          <aside className="side" aria-label="Payment, receipts and privacy">
+            {(walletNote || (resume && !approving)) && (
+              <div className="card wallnote" aria-live="polite">
+                {walletNote && <p>{walletNote}</p>}
+                {resumeBtn}
+              </div>
+            )}
+            {approveEl}
+            <div className="card hist"><History refreshKey={historyKey} speak={speak} /></div>
+            <PrivacyCard facts={privacyFacts} />
+          </aside>
         </div>
-        {ready && speech !== "local" && (
-          <p className="note">
-            <label>
-              <input type="checkbox" checked={cloudSpeech} onChange={(e) => setCloudSpeech(e.target.checked)} />
-              <span>Use online speech recognition. Your voice will be sent to Google. Never say a PIN.</span>
-            </label>
-          </p>
-        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="app">
+      <Header nano={nano} />
+      <div className="panel-body" role="tabpanel" id="panel-talk" aria-labelledby="tab-talk" hidden={tab !== "talk"}>
+        {walletEl(false)}
+        {welcomeEl}
+        {chatEl}
+        {checkboxEl}
       </div>
       <div className="panel-body" role="tabpanel" id="panel-receipts" aria-labelledby="tab-receipts" hidden={tab !== "receipts"}>
         <History refreshKey={historyKey} speak={speak} />

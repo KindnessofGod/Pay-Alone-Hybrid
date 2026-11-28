@@ -11,7 +11,7 @@ export function FingerprintIcon({ color = "#ffffff" }: { color?: string }) {
   );
 }
 
-export function Header({ nano }: { nano: string }) {
+export function Header({ nano, right }: { nano: string; right?: ReactNode }) {
   const p = aiPill(nano);
   return (
     <header>
@@ -21,21 +21,24 @@ export function Header({ nano }: { nano: string }) {
         </div>
         <h1>Pay alone.</h1>
       </div>
-      <div className={`pill tone-${p.tone}`} role="status">
-        <span className="dot" aria-hidden="true" />
-        {p.label}
+      <div className="hdr-right">
+        <div className={`pill tone-${p.tone}`} role="status">
+          <span className="dot" aria-hidden="true" />
+          {p.label}
+        </div>
+        {right}
       </div>
     </header>
   );
 }
 
-export function WalletCard({ note, connected, onConnect, children }: { note?: string; connected?: boolean; onConnect?: () => void; children?: ReactNode }) {
+export function WalletCard({ note, connected, onConnect, children, compact = false }: { note?: string; connected?: boolean; onConnect?: () => void; children?: ReactNode; compact?: boolean }) {
   return (
-    <section className="wallet" aria-label="Wallet">
+    <section className={compact ? "wallet chipbar" : "wallet"} aria-label="Wallet">
       {connected ? (
         <>
           <b><span aria-hidden="true">✓</span> Test wallet connected</b>
-          <small>Your weekly limit protects you</small>
+          {!compact && <small>Your weekly limit protects you</small>}
         </>
       ) : onConnect ? (
         <button type="button" className="walletbtn" onClick={onConnect}>
@@ -46,6 +49,32 @@ export function WalletCard({ note, connected, onConnect, children }: { note?: st
       )}
       {note && <p>{note}</p>}
       {children}
+    </section>
+  );
+}
+
+/** Desktop privacy card: three short promises, then the live technical status. */
+export function PrivacyCard({ facts }: { facts: { label: string; value: string }[] }) {
+  const rows: { icon: ReactNode; text: string }[] = [
+    { icon: <path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6l7-3zM9 12l2 2 4-4" />, text: "AI never moves your money" },
+    { icon: <path d="M7 11V8a5 5 0 0 1 10 0v3M6 11h12v9H6zM12 15v2" />, text: "Your PIN is never heard by AI" },
+    { icon: <path d="M3 12s3.5-6 9-6 9 6 9 6-3.5 6-9 6-9-6-9-6zM4 4l16 16" />, text: "Names and amounts stay hidden online" },
+  ];
+  return (
+    <section className="card privacy" aria-labelledby="privacy-h">
+      <h2 id="privacy-h">Your privacy</h2>
+      <ul className="promises">
+        {rows.map((r) => (
+          <li key={r.text}>
+            <span className="ico" aria-hidden="true">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">{r.icon}</svg>
+            </span>
+            {r.text}
+          </li>
+        ))}
+      </ul>
+      <p className="techline">{facts.map((f) => `${f.label}: ${f.value}`).join(" · ")}</p>
+      <p className="techline">Test money only. Test contacts are simulated.</p>
     </section>
   );
 }
@@ -161,6 +190,7 @@ export function Dock({
   inputRef,
   tab,
   onTab,
+  desk = false,
 }: {
   hint: string;
   listening: boolean;
@@ -172,6 +202,7 @@ export function Dock({
   inputRef?: Ref<HTMLInputElement>;
   tab: Tab;
   onTab?: (t: Tab) => void;
+  desk?: boolean;
 }) {
   return (
     <div className="dock">
@@ -186,14 +217,18 @@ export function Dock({
         <input ref={inputRef} aria-label="Or type what you want to do" placeholder="Or type here" value={typed} onChange={(e) => onTyped?.(e.target.value)} onKeyDown={(e) => e.key === "Enter" && onSubmit?.()} />
         <button type="button" onClick={() => onSubmit?.()}>Go</button>
       </div>
-      <div className="tabs" role="tablist" aria-label="Sections">
-        {TABS.map((t) => (
-          <button key={t.id} type="button" role="tab" id={`tab-${t.id}`} aria-selected={tab === t.id} aria-controls={`panel-${t.id}`} onClick={() => onTab?.(t.id)}>
-            {t.label}
-          </button>
-        ))}
-      </div>
-      <p className="sim-line">Test money only</p>
+      {!desk && (
+        <>
+          <div className="tabs" role="tablist" aria-label="Sections">
+            {TABS.map((t) => (
+              <button key={t.id} type="button" role="tab" id={`tab-${t.id}`} aria-selected={tab === t.id} aria-controls={`panel-${t.id}`} onClick={() => onTab?.(t.id)}>
+                {t.label}
+              </button>
+            ))}
+          </div>
+          <p className="sim-line">Test money only</p>
+        </>
+      )}
     </div>
   );
 }

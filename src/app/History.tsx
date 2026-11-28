@@ -41,7 +41,7 @@ export default function History({ refreshKey, speak }: { refreshKey: number; spe
 
   const last = data?.receipts[0];
   return (
-    <section aria-labelledby="history-h" className="chat">
+    <section aria-labelledby="history-h" className="chat history">
       <h2 id="history-h" className="h3">Recent receipts</h2>
       <div className="row2">
         <button type="button" className="btn ghost small" onClick={() => void load(true)} disabled={busy}>

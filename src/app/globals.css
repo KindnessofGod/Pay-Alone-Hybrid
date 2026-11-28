@@ -114,3 +114,68 @@ code{background:var(--bg);border:1px solid var(--line);padding:2px 6px;border-ra
 .preview-h{color:var(--ink-2);font-size:14px;text-align:center;padding:14px 16px 8px}
 .vh{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 [hidden]{display:none!important}
+
+/* Phone: the header's right side is just the pill, exactly as before. */
+.hdr-right{display:contents}
+
+/* Wide layout (>= 1024px, class .desk): header row, conversation panel on the left, cards on the right. */
+.app.desk{max-width:1200px;width:100%;padding:0 40px 32px;overflow-x:visible;--hh:84px}
+.desk>header{padding:20px 0 16px;min-height:var(--hh)}
+.desk .logo h1{font-size:34px}
+.desk .hdr-right{display:flex;align-items:center;gap:12px}
+.desk .pill{max-width:none;font-size:14px;padding:8px 14px}
+.desk .wallet.chipbar{flex-direction:row;align-items:center;padding:0 14px;min-height:38px;border-radius:999px;background:var(--paper);box-shadow:none}
+.desk .wallet.chipbar b{font-size:14px;white-space:nowrap}
+.desk .walletbtn{margin:0;min-height:44px;padding:0 4px;font-size:14px;white-space:nowrap}
+.desk .grid{display:grid;grid-template-columns:minmax(0,7fr) minmax(0,5fr);gap:40px;align-items:start}
+
+.desk .convo{background:var(--paper);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);display:flex;flex-direction:column;height:calc(100dvh - var(--hh) - 32px);min-height:620px;overflow:hidden}
+.desk .convo .scroll{flex:1;min-height:0;overflow-y:auto;padding:32px 40px 16px;display:flex;flex-direction:column;gap:16px}
+.desk .convo .scroll>.chat:empty{display:none}
+.desk .convo .dock{position:static;padding:16px 40px 24px;border-top:1px solid var(--line);background:var(--paper);backdrop-filter:none}
+.desk .dock{display:grid;grid-template-columns:auto 1fr;grid-template-areas:"mic hint" "mic type";column-gap:24px;align-items:center}
+.desk .mic{grid-area:mic;width:72px;height:72px;margin:6px 14px 6px 6px;box-shadow:0 0 0 5px rgba(195,232,143,.55),0 0 0 11px rgba(195,232,143,.25)}
+.desk .mic svg{width:30px;height:30px}
+.desk .hint{grid-area:hint;text-align:left;margin:0;font-size:17px}
+.desk .type{grid-area:type;margin-top:8px}
+.desk .type input{min-height:52px;font-size:17px}
+.desk .type button{min-height:52px;min-width:72px}
+
+/* Empty start state: centred in the panel, bigger mic */
+.desk .convo.empty .scroll{flex:0 0 auto;padding:0 56px;justify-content:flex-end;align-items:center;text-align:center}
+.desk .convo.empty{justify-content:center;gap:0}
+.desk .convo.empty .welcome{align-items:center;padding:0 0 8px;gap:12px}
+.desk .convo.empty .welcome .big{font-size:64px;line-height:1.02}
+.desk .convo.empty .welcome .note{font-size:20px}
+.desk .convo.empty .examples{justify-content:center;margin-top:18px}
+.desk .convo.empty .dock{display:flex;flex-direction:column;align-items:center;border-top:0;padding:24px 56px 0;max-width:640px;width:100%;margin:0 auto}
+.desk .convo.empty .mic{width:120px;height:120px;margin:16px auto 0;box-shadow:0 0 0 10px rgba(195,232,143,.55),0 0 0 22px rgba(195,232,143,.25)}
+.desk .convo.empty .mic svg{width:48px;height:48px}
+.desk .convo.empty .hint{text-align:center;margin-top:28px;font-size:19px}
+.desk .convo.empty .type{width:100%;margin-top:18px}
+.desk .b{max-width:78%}
+
+/* Right column */
+.desk .side{display:flex;flex-direction:column;gap:20px;position:sticky;top:16px;max-height:calc(100dvh - 32px);overflow-y:auto;padding:4px;margin:-4px}
+.desk .side>*{flex:none}
+.desk .side .card{padding:22px 24px}
+.desk .side .pay{padding:24px}
+.desk .side .amt{font-size:64px}
+.desk .side .done{padding:24px}
+.desk .side .chat{gap:16px}
+.desk .hist .history{gap:10px}
+.desk .hist .row2{display:flex;gap:0 18px;flex-wrap:wrap}
+.desk .hist .btn{width:auto;min-height:44px;padding:0;background:none;border:0;box-shadow:none;font-size:15px;font-weight:600;color:var(--brand-strong);text-decoration:underline;text-underline-offset:3px;border-radius:8px}
+.desk .hist .btn:disabled{text-decoration:none;color:var(--ink-2)}
+.desk .hist .h3{font-size:28px;letter-spacing:-.02em;padding:0}
+.desk .hist .list{gap:0}
+.desk .hist .r{border:0;border-top:1px solid var(--line);border-radius:0;box-shadow:none;padding:14px 0}
+.desk .promises{display:flex;flex-direction:column;gap:14px}
+.desk .promises li{display:flex;gap:14px;align-items:center;font-size:17px;font-weight:600}
+.desk .promises .ico{width:40px;height:40px;border-radius:12px;background:var(--lime-soft);color:var(--brand-strong);display:grid;place-items:center;flex:none}
+.desk .techline{font-size:13px!important;color:var(--ink-2);line-height:1.5}
+.desk .wallnote p{font-size:15px;color:var(--ink-2)}
+.desk .convo.empty .scroll{padding:0 24px}
+.desk .convo.empty .examples{gap:8px}
+.desk .convo.empty .example{font-size:15px;padding:10px 14px}
+.desk .hist .history>div:has(>.btn){display:flex;gap:0 18px;flex-wrap:wrap;align-items:center}
