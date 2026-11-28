@@ -1,0 +1,85 @@
+/* /demo: one screen, two people. Left = customer (light paper), right = shop (deep green). Status is never colour alone. */
+.dm{min-height:100dvh;display:flex;flex-direction:column;background:var(--bg)}
+.dm-top{background:var(--deep);color:#eef9d9;padding:12px 16px;display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center;justify-content:space-between;border-bottom:3px solid var(--lime)}
+.dm-top .dm-brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:17px;flex-wrap:wrap}
+.dm-top .mark{background:var(--lime);color:var(--deep)}
+.dm-top .dm-dot{opacity:.5}
+.dm-top .dm-test{background:var(--lime);color:var(--deep);border-radius:999px;padding:3px 10px;font-size:14px;font-weight:800}
+.dm-top .dm-explain{flex-basis:100%;font-size:15px;color:#cfe3d6;margin:0;max-width:70ch}
+.dm-top .dm-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.dm-top a,.dm-top button{min-height:44px;display:inline-flex;align-items:center;padding:0 14px;border-radius:999px;border:1.5px solid rgba(238,249,217,.45);color:#eef9d9;font-weight:600;font-size:15px;text-decoration:none;background:transparent}
+.dm-top a:hover,.dm-top button:hover{background:rgba(238,249,217,.12)}
+.dm-top button[aria-pressed=true]{background:var(--lime);color:var(--deep);border-color:var(--lime)}
+
+.dm-stage{position:relative;container-type:inline-size;flex:1;display:flex;flex-direction:column}
+.dm-half{padding:20px 16px 28px;display:flex;flex-direction:column;gap:14px;min-width:0}
+.dm-shop{order:1;background:var(--deep);color:#eef9d9}
+.dm-lane{order:2;position:relative;height:92px;display:grid;place-items:center;background:linear-gradient(180deg,var(--deep) 0,var(--deep) 12%,#e8f1e3 88%,#e8f1e3 100%)}
+.dm-customer{order:3;background:linear-gradient(180deg,#e8f1e3,#f4f8f1)}
+.dm-who{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.dm-role{font-size:13px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;border-radius:999px;padding:4px 12px}
+.dm-customer .dm-role{background:var(--deep);color:var(--lime)}
+.dm-shop .dm-role{background:var(--lime);color:var(--deep)}
+.dm-half h2{font-family:var(--font-serif),Georgia,serif;font-weight:400;font-size:34px;line-height:1.05;letter-spacing:-.02em}
+.dm-half .dm-persona{font-size:15px;opacity:.8}
+
+/* Wallet cards */
+.dm-wallet{border-radius:20px;padding:16px 18px;display:flex;flex-direction:column;gap:4px;border:2px solid transparent}
+.dm-customer .dm-wallet{background:var(--paper);border-color:var(--brand);box-shadow:var(--shadow)}
+.dm-shop .dm-wallet{background:rgba(195,232,143,.12);border-color:rgba(195,232,143,.6)}
+.dm-wallet .dm-wl{font-size:13px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;display:flex;gap:8px;align-items:center;justify-content:space-between}
+.dm-wallet .dm-tag{font-size:12px;border-radius:6px;padding:2px 7px;background:var(--wait-soft);color:var(--wait);letter-spacing:.04em}
+.dm-wallet .dm-big{font-family:var(--font-serif),Georgia,serif;font-size:30px;line-height:1.15;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.dm-wallet .dm-line{font-size:15px;opacity:.85}
+.dm-wallet .dm-addr{font-size:14px;overflow-wrap:anywhere;opacity:.9}
+.dm-wallet .dm-fine{font-size:13px;opacity:.7;margin-top:2px}
+.dm-bump{animation:dm-bump .9s ease-out}
+@keyframes dm-bump{0%{box-shadow:0 0 0 0 rgba(195,232,143,.9)}100%{box-shadow:0 0 0 22px rgba(195,232,143,0)}}
+
+/* Shop half: dark surfaces, light text. White cards from the main app become dark glass. */
+.dm-shop .card:not(.shopstatus){background:rgba(255,255,255,.07);border-color:rgba(195,232,143,.3);box-shadow:none;color:#eef9d9}
+.dm-shop .card h2{font-size:26px}
+.dm-shop .shopform label{color:#cfe3d6}
+.dm-shop .note{color:#b9d0c4}
+.dm-shop .btn.primary{background:var(--lime);color:var(--deep)}
+.dm-shop .btn.ghost{background:transparent;color:#eef9d9;border:1.5px solid rgba(238,249,217,.5);box-shadow:none}
+.dm-shop .field{border-color:#9fb8aa}
+.dm-shop .shopstatus .label,.dm-shop .shopstatus .sub{color:inherit}
+.dm-shop .shopstatus.s-wait{border:2px solid #d9c985}
+.dm-shop .shopstatus .headline{font-size:40px}
+.dm-shop .shopstatus .sub{font-size:24px}
+.dm-shop .shopstatus.s-good{animation:dm-arrive .9s ease-out}
+@keyframes dm-arrive{0%{transform:scale(.97)}50%{transform:scale(1.02)}100%{transform:scale(1)}}
+.dm-customer .card,.dm-customer .pay,.dm-customer .done{box-shadow:var(--shadow)}
+.dm-idle{border:2px dashed var(--line-strong);border-radius:var(--radius);padding:20px;color:var(--ink-2);font-size:17px}
+
+/* The lane and the moving token */
+.dm-laneline{position:absolute;left:0;right:0;top:50%;height:0;border-top:3px dashed rgba(15,59,48,.35)}
+.dm-lanelabel{position:relative;z-index:1;background:var(--paper);border:1.5px solid var(--line-strong);border-radius:999px;padding:4px 14px;font-size:13px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-2)}
+.dm-stage[data-stage=moving] .dm-laneline{border-top-color:var(--brand)}
+.dm-token{position:absolute;z-index:6;left:50%;top:50%;display:flex;gap:10px;align-items:center;white-space:nowrap;background:var(--lime);color:var(--deep);border:3px solid var(--deep);border-radius:999px;padding:8px 18px;font-weight:800;font-size:22px;box-shadow:0 8px 24px rgba(12,42,33,.35);font-variant-numeric:tabular-nums;animation:dm-fly-y 1.8s cubic-bezier(.45,0,.2,1) both;pointer-events:none}
+.dm-token .dm-arrow{display:inline-block;transform:rotate(-90deg)}
+@keyframes dm-fly-y{0%{opacity:0;transform:translate(-50%,calc(-50% + 70px))}12%{opacity:1}88%{opacity:1}100%{opacity:1;transform:translate(-50%,calc(-50% - 70px))}}
+@keyframes dm-fade{0%{opacity:0}20%{opacity:1}80%{opacity:1}100%{opacity:0}}
+
+.dm-band{display:none}
+@media (min-width:1024px){
+  .dm-stage{display:grid;grid-template-columns:1fr 112px 1fr;grid-template-rows:auto 1fr}
+  .dm-band{display:block;grid-column:1/-1;grid-row:1;order:0;position:relative;height:96px;background:linear-gradient(90deg,#e8f1e3 0,#e8f1e3 46%,var(--deep) 54%,var(--deep) 100%);border-bottom:2px dashed rgba(15,59,48,.25)}
+  .dm-bandlabel{position:absolute;left:50%;bottom:6px;transform:translateX(-50%);font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--deep);background:var(--lime);border-radius:999px;padding:2px 12px;white-space:nowrap}
+  .dm-lane>.dm-token{display:none}
+  .dm-customer{grid-row:2;grid-column:1;padding:28px 32px 40px;background:linear-gradient(180deg,#e8f1e3,#f4f8f1)}
+  .dm-lane{grid-row:2;grid-column:2;height:auto;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;padding-top:24px;background:linear-gradient(90deg,#e8f1e3 0,#e8f1e3 8%,var(--deep) 92%,var(--deep) 100%)}
+  .dm-shop{grid-row:2;grid-column:3;padding:28px 32px 40px}
+  .dm-laneline{left:50%;right:auto;top:0;bottom:0;height:auto;width:0;border-top:0;border-left:3px dashed rgba(195,232,143,.65);mix-blend-mode:normal}
+  .dm-lanelabel{margin-top:0;background:var(--lime);color:var(--deep);border-color:var(--deep)}
+  .dm-token{left:50%;top:40%;animation:dm-fly-x 1.8s cubic-bezier(.45,0,.2,1) both}
+  .dm-token .dm-arrow{transform:none}
+  @keyframes dm-fly-x{0%{opacity:0;transform:translate(calc(-50% - 25cqw),-50%) scale(.9)}12%{opacity:1;transform:translate(calc(-50% - 25cqw + 4cqw),-50%) scale(1)}88%{opacity:1}100%{opacity:1;transform:translate(calc(-50% + 25cqw),-50%) scale(1)}}
+}
+@media (prefers-reduced-motion:reduce){
+  .dm-token{animation:dm-fade 1.8s both;transform:translate(-50%,-50%)}
+  .dm-bump,.dm-shop .shopstatus.s-good{animation:none}
+}
+.dm-shop .shopstatus .btn.ghost{color:inherit;border:2px solid currentColor;background:transparent}
+.dm-shop .shopstatus.s-wait .btn.ghost{color:var(--wait)}

@@ -12,6 +12,7 @@ import { randomInt } from "crypto";
 import { randomToken } from "../secret";
 import type { Store } from "../store";
 import { audit } from "./audit";
+import { demoShopId, isDemoShopId } from "./demo";
 
 export const REQUEST_TTL_MS = 5 * 60_000;
 export const SHOP_REQUESTS_PER_MINUTE = 10;
@@ -113,7 +114,10 @@ export type CreateResult =
   | { ok: true; request: { id: string; ref: string; expiresAt: number } }
   | { ok: false; reason: "bad_code" | "unknown_code" | "bad_amount" | "over_limit" | "bad_name" | "bad_note" | "self_request" | "too_many_requests" | "buyer_busy" };
 
-export async function createRequest(d: SellerDeps, shopUserId: string, body: { code?: unknown; amountMinor?: unknown; shopName?: unknown; note?: unknown }): Promise<CreateResult> {
+/** opts.demo: set by the route ONLY for the /demo page (demo.ts). It relaxes the self-request rule and nothing else. */
+export async function createRequest(d: SellerDeps, callerId: string, body: { code?: unknown; amountMinor?: unknown; shopName?: unknown; note?: unknown }, opts: { demo?: boolean } = {}): Promise<CreateResult> {
+  const demo = opts.demo === true;
+  const shopUserId = demo ? demoShopId(callerId) : callerId; // demo: the shop side is a separate id, so the same person can ask themselves
   const now = clock(d);
   const fail = async (reason: Extract<CreateResult, { ok: false }>["reason"]): Promise<CreateResult> => {
     await audit(d.store, shopUserId, "request_created", { outcome: "fail", reason }, now);
@@ -134,7 +138,7 @@ export async function createRequest(d: SellerDeps, shopUserId: string, body: { c
   }
   const owner = await d.store.get<{ userId: string }>("paycodes", code);
   if (!owner) return fail("unknown_code");
-  if (owner.userId === shopUserId) return fail("self_request");
+  if (owner.userId === callerId && !demo) return fail("self_request");
 
   const recent = await d.store.list<{ createdAt: number }>("requests_by_shop", { prefix: `${shopUserId}|`, newestFirst: true, limit: SHOP_REQUESTS_PER_MINUTE });
   if (recent.filter((r) => r.createdAt > now - 60_000).length >= SHOP_REQUESTS_PER_MINUTE) return fail("too_many_requests");
@@ -167,8 +171,10 @@ export type ShopStatusResult =
 
 /** The shop reads the status the server set. Only the shop that asked can see it. */
 export async function shopStatus(d: SellerDeps, shopUserId: string, id: unknown): Promise<ShopStatusResult> {
+  if (isDemoShopId(shopUserId)) return { ok: false, reason: "not_found" }; // a caller cannot claim the demo prefix
   const r0 = await load(d, id);
-  if (!r0 || r0.shopUserId !== shopUserId) return { ok: false, reason: "not_found" };
+  // The shop that asked reads it; so does the same person for a /demo request they made (shop side demo-shop:<uid>).
+  if (!r0 || (r0.shopUserId !== shopUserId && r0.shopUserId !== demoShopId(shopUserId))) return { ok: false, reason: "not_found" };
   const r = await expireIfDue(d, r0, shopUserId);
   return { ok: true, status: r.status, ref: r.ref, shopName: r.shopName, amountMinor: r.amountMinor, assetCode: r.assetCode, assetScale: r.assetScale, expiresAt: r.expiresAt };
 }
@@ -252,6 +258,9 @@ export async function releaseClaim(d: { store: Store }, id: string, by: string):
 /** The server marks the request paid in the same step that records the receipt. */
 export async function markPaid(d: SellerDeps, buyerId: string, id: string, by: string): Promise<void> {
   const now = clock(d);
-  const done = await d.store.update<ShopRequest, boolean>("requests", id, (cur) => (cur && cur.status === "pending" && cur.claim?.by === by ? { doc: { ...cur, status: "paid", claim: undefined }, result: true } : { doc: cur, result: false }));
+  const done = await d.store.update<ShopRequest, "demo" | "ok" | false>("requests", id, (cur) =>
+    cur && cur.status === "pending" && cur.claim?.by === by ? { doc: { ...cur, status: "paid", claim: undefined }, result: isDemoShopId(cur.shopUserId) ? "demo" : "ok" } : { doc: cur, result: false },
+  );
   await audit(d.store, buyerId, "request_paid", done ? { outcome: "ok", shopRequestId: id } : { outcome: "fail", reason: "not_claimed", shopRequestId: id }, now);
+  if (done === "demo") await audit(d.store, buyerId, "demo_paid", { outcome: "ok", shopRequestId: id }, now);
 }
