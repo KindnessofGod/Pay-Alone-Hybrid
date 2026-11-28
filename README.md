@@ -17,6 +17,7 @@ Voice payments for people who cannot use a banking screen: blind and low-vision 
 | Start Nano | `model.initializeDeviceModel()` on the first tap | Required user gesture | `src/lib/firebase/engines.ts` |
 | Routing policy and limit | Remote Config `routing_policy`, `voice_limit_minor` | Change routing live, or switch AI off | `src/lib/firebase/client.ts` |
 | Spoken voice (not AI Logic) | Kokoro-82M (Apache-2.0) via `kokoro-js`, **on this computer** (wasm, or WebGPU if it works); the model (~90 MB) downloads once from Hugging Face; the sentence never leaves the computer; the browser voice speaks until it is ready or if it fails | Natural voice without sending text anywhere | `src/lib/hybrid/tts.ts`, `src/lib/hybrid/ttsBrowser.ts` |
+| **Prototype, OFF by default** (`?live=1`): natural voice conversation | Gemini Live API through Firebase AI Logic (`getLiveGenerativeModel`, `gemini-3.1-flash-live-preview`), **online only; the voice goes to Google** | Real-time talk. The model can only call `propose_payment`; the payment words come from our own transcript and run through the normal tripwire, `understand()` and cross-check; the read-back is our template; the mic is paused while the Approve card is open. Not yet verified on a real microphone. | `src/lib/hybrid/live.ts`, `src/lib/firebase/live.ts`, `src/app/useLive.ts` |
 | Protect the cloud path | App Check (reCAPTCHA v3; debug token locally) | Required for AI Logic | `src/lib/firebase/client.ts` |
 
 ## Safety design (each one has tests)

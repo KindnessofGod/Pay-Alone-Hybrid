@@ -20,6 +20,8 @@ import Approve from "./Approve";
 import { Bubble, Chip, Dock, Header, ListeningBubble, PinStopped, PrivacyCard, SPEECH_CONSENT_TEXT, SpeechConsent, WalletCard, type Tab } from "./ui";
 import History from "./History";
 import { takeResume, type Resume } from "@/lib/ui/resume";
+import { liveEnabled } from "@/lib/hybrid/live";
+import { useLive } from "./useLive";
 
 // SIMULATED test contacts until the saved-contacts screen exists (the server checks the same list).
 const CONTACTS: Contact[] = DEMO_CONTACTS.map((c) => ({ ...c }));
@@ -128,6 +130,54 @@ export default function Home() {
   const speak = useCallback(async (t: string) => {
     await say(t);
   }, []);
+
+  // Gemini Live prototype: OFF unless the page was opened with ?live=1 (remembered for this tab session).
+  const [liveOn, setLiveOn] = useState(false);
+  useEffect(() => {
+    let ss: Storage | undefined;
+    try {
+      ss = window.sessionStorage;
+    } catch {
+      ss = undefined;
+    }
+    setLiveOn(liveEnabled(window.location.search, ss));
+  }, []);
+  const liveSettings = useRef<{ policy: Policy; limitMinor: string; nano: string }>({ policy, limitMinor, nano });
+  liveSettings.current = { policy, limitMinor, nano };
+  const live = useLive({
+    // The same understand() as typed or spoken input: tripwire, instant rules, Nano, redacted cloud, crossCheck.
+    understand: (said) => {
+      const c = liveSettings.current;
+      return understand(said, { contacts: CONTACTS, limitMinor: c.limitMinor, policy: c.policy, deviceAvailable: c.nano === "available" || c.nano === "warming up", instant: true }, {
+        onDeviceBusy: firebaseEngines.onDeviceBusy,
+        onDevice: (x) => firebaseEngines.onDevice(x),
+        cloud: (x) => firebaseEngines.cloud(x),
+      });
+    },
+    // Opens the existing Approve card (server quote, fingerprint or PIN). The read-back is our own template.
+    present: async (r, said) => {
+      const o = dialogNext(dialog.current, r, { contacts: CONTACTS, said, limitMinor: liveSettings.current.limitMinor });
+      dialog.current = o.state;
+      if (!(o.then === "approve" && o.approve)) return false;
+      seq.current++;
+      setResult(r);
+      setApproving({ ...o.approve, key: Date.now() });
+      return true;
+    },
+    onTripwire: (secret) => {
+      const r: Understood = { kind: "secret_spoken", secret, source: "rules" };
+      const o = dialogNext(dialog.current, r, { contacts: CONTACTS, said: "", limitMinor: liveSettings.current.limitMinor });
+      dialog.current = o.state;
+      setResult(r);
+      addTurn("you", "(deleted)");
+      addTurn("app", o.say);
+      void speak(o.say); // the existing warning, in our own voice
+    },
+    onProblem: (t) => {
+      addTurn("app", t);
+      void speak(t);
+    },
+  });
 
   type Settings = { policy: Policy; limitMinor: string; nano: string };
 
@@ -358,16 +408,32 @@ export default function Home() {
     void say(t).catch(() => undefined); // the browser may block speech before a first tap; the text stays on screen
   }, []);
 
+  // Live mic button: start or stop the Live conversation. Falls back to the normal flow if Live fails.
+  const toggleLive = useCallback(async () => {
+    if (live.active) {
+      await live.stop();
+      return;
+    }
+    stopListening();
+    lastInput.current = "typed"; // the normal hands-free loop stays off while Live is the voice
+    try {
+      if (!ready) await start(false);
+    } catch {
+      /* typing and the normal flow still work */
+    }
+    await live.start();
+  }, [live, ready]); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.code === "Space" && ready && !approving && document.activeElement?.tagName !== "INPUT") {
         e.preventDefault();
-        void talk();
+        void (liveOn && !live.failed ? toggleLive() : talk());
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [ready, talk, approving]);
+  }, [ready, talk, approving, liveOn, live.failed, toggleLive]);
 
   // The same wallet connection the approval card offers: the wallet's own page sets the weekly limit.
   async function connectWallet() {
@@ -397,10 +463,11 @@ export default function Home() {
               ? "not available in this browser"
               : "off, type instead";
   const voiceWords = voice === "ready" ? "natural (on this computer)" : voice === "loading" ? "loading, browser voice meanwhile" : "browser";
-  const hint = !ready ? "Tap to start talking" : listening ? "Listening…" : approving ? "Approve on the card, or say \"no\" to cancel" : "Tap and speak";
-  const micLabel = !ready ? "Tap to start talking" : listening ? "Listening. Press to stop" : "Press to speak (or Space)";
+  const hint = live.active ? (approving ? "Approve on the card" : "Live voice is on. Talk, or tap to stop") : !ready ? "Tap to start talking" : listening ? "Listening…" : approving ? "Approve on the card, or say \"no\" to cancel" : "Tap and speak";
+  const micLabel = live.active ? "Live voice is on. Press to stop" : !ready ? "Tap to start talking" : listening ? "Listening. Press to stop" : "Press to speak (or Space)";
   const onMic = () => {
-    if (!ready) void start().catch(() => setWorking("Something went wrong while starting. Please reload the page."));
+    if (liveOn && !live.failed) void toggleLive();
+    else if (!ready) void start().catch(() => setWorking("Something went wrong while starting. Please reload the page."));
     else void talk();
   };
 
@@ -437,6 +504,7 @@ export default function Home() {
               })()}
               onClose={(outcome) => {
                 stopListening(); // the approval card may still have the mic open for "no"
+                live.resume(); // Gemini Live prototype: mic and voice come back after paid or stopped
                 setApproving(null);
                 seq.current++; // anything still running from before no longer owns the screen
                 const my = seq.current;
@@ -526,6 +594,25 @@ export default function Home() {
               )}
             </ol>
           )}
+          {live.turns.length > 0 && (
+            <ol className="chat" aria-label="Live conversation">
+              {live.turns.map((t, i) => (
+                <Bubble
+                  key={`live${i}`}
+                  who={t.who}
+                  chip={
+                    t.who === "app" ? (
+                      <span className="chipstatic tone-cloud">
+                        <span aria-hidden="true">🎙</span> Gemini Live (Google, online)
+                      </span>
+                    ) : undefined
+                  }
+                >
+                  {t.text}
+                </Bubble>
+              ))}
+            </ol>
+          )}
           {(consent || listening) && (
             <ol className="chat" aria-label="Listening">
               {consent && !listening && (
@@ -575,7 +662,7 @@ export default function Home() {
               {chatEl}
               {checkboxEl}
             </div>
-            <Dock desk hint={hint} listening={listening} micLabel={micLabel} onMic={onMic} typed={typed} onTyped={setTyped} onSubmit={() => void submitTyped()} inputRef={inputBox} tab={tab} />
+            <Dock desk hint={hint} listening={listening || live.active} micLabel={micLabel} onMic={onMic} typed={typed} onTyped={setTyped} onSubmit={() => void submitTyped()} inputRef={inputBox} tab={tab} />
           </section>
           <aside className="side" aria-label="Payment, receipts and privacy">
             {(walletNote || (resume && !approving)) && (
@@ -625,7 +712,7 @@ export default function Home() {
           </div>
         </section>
       </div>
-      <Dock hint={hint} listening={listening} micLabel={micLabel} onMic={onMic} typed={typed} onTyped={setTyped} onSubmit={() => void submitTyped()} inputRef={inputBox} tab={tab} onTab={setTab} />
+      <Dock hint={hint} listening={listening || live.active} micLabel={micLabel} onMic={onMic} typed={typed} onTyped={setTyped} onSubmit={() => void submitTyped()} inputRef={inputBox} tab={tab} onTab={setTab} />
     </div>
   );
 }

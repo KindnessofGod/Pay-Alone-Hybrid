@@ -9,6 +9,8 @@ import { HttpError } from "./http";
 export const CLIENT_ERROR_CODES = ["understand_failed", "chat_failed", "mic_failed", "start_failed", "approve_failed", "history_failed"] as const;
 /** Chrome speech errors as the app reports them: only a code, never a transcript. */
 export const SPEECH_ERROR_CODES = ["not_allowed", "service_not_allowed", "network", "language_not_supported", "audio_capture", "other"] as const;
+/** Gemini Live prototype: why a session ended or failed. A fixed list, never text. */
+export const LIVE_CODES = ["mic_denied", "unavailable", "quota", "tripwire", "stopped", "other"] as const;
 export const CLIENT_LIMIT_PER_MINUTE = 60;
 
 const SOURCES = ["on_device", "cloud", "rules"];
@@ -30,6 +32,10 @@ export function validateClientEvent(b: Record<string, unknown>): { event: string
       return typeof b.code === "string" && (CLIENT_ERROR_CODES as readonly string[]).includes(b.code) ? { event: "error", fields: { outcome: "fail", code: b.code } } : null;
     case "speech_error":
       return typeof b.code === "string" && (SPEECH_ERROR_CODES as readonly string[]).includes(b.code) ? { event: "speech_error", fields: { outcome: "fail", code: b.code } } : null;
+    case "live_session":
+      if (b.outcome !== "started" && b.outcome !== "ended" && b.outcome !== "error") return null;
+      if (b.code === undefined) return { event: "live_session", fields: { outcome: b.outcome } };
+      return typeof b.code === "string" && (LIVE_CODES as readonly string[]).includes(b.code) ? { event: "live_session", fields: { outcome: b.outcome, code: b.code } } : null;
     default:
       return null;
   }

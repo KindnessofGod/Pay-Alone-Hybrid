@@ -141,3 +141,16 @@ describe("client event limiter fails closed", () => {
     expect((await store.list("audit")).length).toBe(0);
   });
 });
+
+describe("live_session event (Gemini Live prototype)", () => {
+  it("keeps only outcome and a fixed code", () => {
+    expect(validateClientEvent({ event: "live_session", outcome: "started" })).toEqual({ event: "live_session", fields: { outcome: "started" } });
+    expect(validateClientEvent({ event: "live_session", outcome: "error", code: "quota", transcript: "my pin is 1234" })).toEqual({ event: "live_session", fields: { outcome: "error", code: "quota" } });
+    expect(validateClientEvent({ event: "live_session", outcome: "ended", code: "tripwire" })).toEqual({ event: "live_session", fields: { outcome: "ended", code: "tripwire" } });
+  });
+  it("rejects unknown outcomes and free-text codes", () => {
+    expect(validateClientEvent({ event: "live_session", outcome: "maybe" })).toBeNull();
+    expect(validateClientEvent({ event: "live_session" })).toBeNull();
+    expect(validateClientEvent({ event: "live_session", outcome: "error", code: "send 5000 naira to Tunde" })).toBeNull();
+  });
+});
