@@ -206,7 +206,7 @@ code{background:var(--bg);border:1px solid var(--line);padding:2px 6px;border-ra
 .shopstatus .label{color:var(--ink-2);font-size:17px;font-weight:600}
 .shopstatus .headline{font-family:var(--font-serif),Georgia,serif;font-size:48px;line-height:1.08;letter-spacing:-.02em;overflow-wrap:anywhere}
 .shopstatus .sicon{font-family:var(--font-sans),sans-serif;font-weight:800}
-.shopstatus .sub{font-size:22px;font-weight:600;margin-top:8px}
+.shopstatus .sub{font-size:30px;font-weight:800;margin-top:8px}
 .shopstatus.s-wait{background:var(--wait-soft);border-color:#d9c985;color:var(--wait)}
 .shopstatus.s-good{background:var(--good-soft);border:2px solid var(--good);color:var(--brand-strong)}
 .shopstatus.s-bad{background:var(--bad-soft);border:2px solid var(--bad);color:#7d1f17}

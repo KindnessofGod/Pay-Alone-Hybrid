@@ -65,7 +65,7 @@ export function ShopStatus({ tone, headline, sub, shop, onNew }: { tone: ShopTon
       <p className="label">{shop}</p>
       <div role="status" aria-live="assertive">
         <p className="headline">
-          <span className="sicon" aria-hidden="true">{tone === "good" ? "✓" : tone === "bad" ? "✕" : "…"}</span> {headline}
+          <span className="sicon" aria-hidden="true">{tone === "good" ? "✓" : tone === "bad" ? "✕" : "⏳"}</span> {headline}
         </p>
         <p className="sub">{sub}</p>
       </div>
