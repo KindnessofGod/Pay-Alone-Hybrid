@@ -6,7 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api, firebaseConfigured, reportEvent } from "@/lib/firebase/client";
 import { formatAmount } from "@/lib/money";
 import { ReceiptRow } from "./ui";
-import { activityLine, badgeOf, debugLine, receiptSentence, type EventView, type ReceiptView } from "@/lib/ui/history";
+import { activityLine, badgeOf, debugRow, receiptSentence, type EventView, type ReceiptView } from "@/lib/ui/history";
 
 type Loaded = { receipts: ReceiptView[]; events: EventView[] };
 
@@ -85,8 +85,15 @@ export default function History({ refreshKey, speak }: { refreshKey: number; spe
             <summary>Debug log: my last {data.events.length} steps</summary>
             <ol aria-label="Debug log, newest first" className="note">
               {data.events.map((e, i) => (
-                <li key={`d${e.at}-${i}`}>
-                  <code>{debugLine(e)}</code>
+                <li key={`d${i}`} style={{ color: "var(--ink)", fontSize: 14, padding: "2px 0" }}>
+                  {(() => {
+                    const r = debugRow(e);
+                    return (
+                      <>
+                        <span>{r.time}</span> <strong>{r.event}</strong> <span>{r.status}</span> {r.reason && <span>({r.reason})</span>}
+                      </>
+                    );
+                  })()}
                 </li>
               ))}
             </ol>

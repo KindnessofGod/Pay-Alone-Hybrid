@@ -10,7 +10,7 @@ import { readCloudOptIn, writeCloudOptIn } from "@/lib/hybrid/speechoptin";
 import { api, firebaseApp, firebaseConfigured, remoteSettings, reportEvent } from "@/lib/firebase/client";
 import { speechMode, type SpeechStatus } from "@/lib/hybrid/speechpolicy";
 import { chatEngines, firebaseEngines, lastCall, prepareOnDevice, warmUpOnDevice } from "@/lib/firebase/engines";
-import { DEMO_CONTACTS } from "@/lib/demo/contacts";
+import { DEMO_CONTACTS, CONTACT_PRONUNCIATION } from "@/lib/demo/contacts";
 import { speaker } from "@/lib/hybrid/ttsBrowser";
 import type { TtsStatus } from "@/lib/hybrid/tts";
 import { chatReply, type ChatTurn } from "@/lib/hybrid/chat";
@@ -146,7 +146,9 @@ export default function Home() {
 
   // Gemini Live prototype: OFF unless the page was opened with ?live=1 (remembered for this tab session).
   const [liveOn, setLiveOn] = useState(false);
+  const [debugOn, setDebugOn] = useState(false); // ?debug=1: show the Debug panel (in memory only)
   useEffect(() => {
+    setDebugOn(new URLSearchParams(window.location.search).get("debug") === "1");
     let ss: Storage | undefined;
     try {
       ss = window.sessionStorage;
@@ -158,7 +160,9 @@ export default function Home() {
   const liveSettings = useRef<{ policy: Policy; limitMinor: string; nano: string }>({ policy, limitMinor, nano });
   liveSettings.current = { policy, limitMinor, nano };
   const live = useLive({
-    // The same understand() as typed or spoken input: tripwire, instant rules, Nano, redacted cloud, crossCheck.
+    contacts: CONTACTS,
+    pronunciation: CONTACT_PRONUNCIATION,
+    // Fallback only (the model promised details but called no tool): the same understand() as typed or spoken input.
     understand: (said) => {
       const c = liveSettings.current;
       return understand(said, { contacts: CONTACTS, limitMinor: c.limitMinor, policy: c.policy, deviceAvailable: c.nano === "available" || c.nano === "warming up", instant: true }, {
@@ -167,6 +171,7 @@ export default function Home() {
         cloud: (x) => firebaseEngines.cloud(x),
       });
     },
+    limitMinor: () => liveSettings.current.limitMinor,
     // Opens the existing Approve card (server quote, fingerprint or PIN). The read-back is our own template.
     present: async (r, said) => {
       const o = dialogNext(dialog.current, r, { contacts: CONTACTS, said, limitMinor: liveSettings.current.limitMinor });
@@ -654,6 +659,15 @@ export default function Home() {
                 </Bubble>
               ))}
             </ol>
+          )}
+          {debugOn && (
+            <details className="card" style={{ fontSize: 12, wordBreak: "break-word" }}>
+              <summary>Debug (this page only, never sent)</summary>
+              <p>Tool calls</p>
+              <pre>{live.toolLog.length ? JSON.stringify(live.toolLog, null, 1) : "none yet"}</pre>
+              <p>Transcripts this session</p>
+              <pre>{live.turns.length ? live.turns.map((t) => `${t.who === "you" ? "person" : "assistant"}: ${t.text}`).join("\n") : "none yet"}</pre>
+            </details>
           )}
           {(consent || listening) && (
             <ol className="chat" aria-label="Listening">

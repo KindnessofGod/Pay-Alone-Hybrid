@@ -3,25 +3,33 @@
 "use client";
 import { getLiveGenerativeModel, ResponseModality, Schema } from "firebase/ai";
 import { firebaseAI } from "./client";
-import { LIVE_MODEL, LIVE_SYSTEM_INSTRUCTION, type LiveSessionLike } from "../hybrid/live";
+import { LIVE_MODEL, type LiveSessionLike } from "../hybrid/live";
+import type { Contact } from "../hybrid/crosscheck";
+import { liveInstruction } from "../hybrid/livepay";
 
-export async function connectLive(): Promise<LiveSessionLike> {
+export async function connectLive(contacts: Contact[], pronunciation: Record<string, string> = {}): Promise<LiveSessionLike> {
   const model = getLiveGenerativeModel(firebaseAI(), {
     model: LIVE_MODEL,
     generationConfig: {
       responseModalities: [ResponseModality.AUDIO],
-      speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: "Puck" } } },
+      speechConfig: { languageCode: "en-US", voiceConfig: { prebuiltVoiceConfig: { voiceName: "Puck" } } },
       inputAudioTranscription: {},
       outputAudioTranscription: {},
     },
-    systemInstruction: LIVE_SYSTEM_INSTRUCTION,
+    systemInstruction: liveInstruction(contacts, pronunciation),
     tools: [
       {
         functionDeclarations: [
           {
             name: "propose_payment",
-            description: "Call when the person wants to pay someone. The app shows them the details; it never sends money by itself.",
-            parameters: Schema.object({ properties: { request: Schema.string({ description: "The person's own words about the payment." }) } }),
+            description: "Call whenever the person wants to pay, send or give money to someone. The app shows them the details; it never sends money by itself.",
+            parameters: Schema.object({
+              properties: {
+                payee: Schema.enumString({ enum: contacts.map((c) => c.name), description: "The saved person to pay, exactly as listed." }),
+                amount_naira: Schema.number({ description: "The amount in naira, as the person said it." }),
+                request: Schema.string({ description: "The person's own words about the payment." }),
+              },
+            }),
           },
         ],
       },

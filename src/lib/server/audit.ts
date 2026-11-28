@@ -47,6 +47,7 @@ const FIELDS: Record<string, Check> = {
   where: word,
   stage: oneOf("mic", "player", "connect", "session"),
   close_code: int(65_535),
+  who: oneOf("person", "assistant"),
 };
 /** Kept in the person's own history but never printed. */
 const STORED_ONLY: Record<string, Check> = {
@@ -55,7 +56,7 @@ const STORED_ONLY: Record<string, Check> = {
 
 export type AuditFields = { outcome?: string; reason?: string; receiptId?: string; method?: "pin" | "passkey"; asset?: string; simulated?: boolean; source?: "on_device" | "cloud" | "rules" | "none"; guarded?: boolean; voice?: "natural" | "browser"; code?: string; ms?: number; requestId?: string; amountMinor?: string;
   sid?: string; t?: number; state?: string; speech?: string; mode?: string; chars?: number; choice?: string; index?: number; kind?: string; cloud_raced?: boolean; engine?: string; ok?: boolean;
-  method_offered?: string; action?: string; shown?: boolean; tab?: string; count?: number; where?: string; stage?: string; close_code?: number;
+  method_offered?: string; action?: string; shown?: boolean; tab?: string; count?: number; where?: string; stage?: string; close_code?: number; who?: string;
 };
 
 export interface AuditRecord extends AuditFields {

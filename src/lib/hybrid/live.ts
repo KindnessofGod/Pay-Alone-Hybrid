@@ -3,25 +3,19 @@
 //
 // Money stays locked exactly as in the normal flow:
 //  - Live is only a voice. The model may call ONE tool, propose_payment, and it never approves anything.
-//  - The words used for a payment are OUR transcript of what the person said (input transcription), not
-//    the tool arguments. They go through the existing path: tripwire -> understand() -> crossCheck.
+//  - The tool arguments {payee, amount_naira} are only a suggestion: livepay.ts checks them in plain code
+//    against the saved contacts, the spending limit and OUR transcript of what the person said. The PIN tripwire runs first.
 //  - The read-back the person hears is our template, spoken by our own say(); Live audio is muted then.
 //  - The PIN tripwire runs on every transcription chunk. HONEST LIMIT: with Live the audio itself has
 //    already reached Google when the words are transcribed, so the tripwire cannot recall it. It stops
 //    the session at once and nothing further is sent or used.
 import { spokenSecret, type SecretKind } from "./tripwire";
 import type { Understood } from "./understand";
+import type { Contact } from "./crosscheck";
+import { decideLivePayment, promisesDetails } from "./livepay";
 
 export const LIVE_MODEL = "gemini-3.1-flash-live-preview"; // first Gemini Developer API model on firebase.google.com/docs/ai-logic/live-api
 export const LIVE_FLAG_KEY = "payalone_live";
-
-export const LIVE_SYSTEM_INSTRUCTION =
-  "You are the friendly voice assistant of Pay Alone, a payment app for blind, elderly and non-reading people. " +
-  "Speak English. Keep every answer short and plain, one or two sentences. " +
-  "You can never approve, confirm or send money, and you never say that money was sent. " +
-  "Never ask for a PIN, a password or a code, and never repeat one. If a PIN comes up, tell the person to type it on the keypad on the screen. " +
-  "When the person wants to pay someone, call the tool propose_payment with request set to the person's own words. " +
-  "After you call it, say only that you will show them the details. Do not repeat the name or the amount.";
 
 /** ?live=1 turns the prototype on for this tab session (remembered), ?live=0 turns it off. Default: off. */
 export function liveEnabled(search: string, storage?: Pick<Storage, "getItem" | "setItem" | "removeItem">): boolean {
@@ -94,41 +88,37 @@ export function createMicGate<T>(send: (chunk: T) => void) {
 
 // ---- the one tool ---------------------------------------------------------------------------------
 
-export type ToolOutcome = { kind: "response"; response: { shown: boolean; reason?: string } } | { kind: "tripwire"; secret: SecretKind };
+export type ToolResponse = { shown: boolean; reason?: string; names?: string[] };
+export type ToolOutcome = { kind: "response"; response: ToolResponse } | { kind: "tripwire"; secret: SecretKind };
+type ProposalResult = Extract<Understood, { kind: "proposal" }>;
 
 export interface ToolDeps {
   latestInput: () => string;
-  understand: (said: string) => Promise<Understood>;
+  contacts: Contact[];
+  limitMinor: () => string;
   /** Opens the existing Approve card. False if the app could not (the dialog said no). */
-  present: (r: Extract<Understood, { kind: "proposal" }>, said: string) => Promise<boolean>;
+  present: (r: ProposalResult, said: string) => Promise<boolean>;
   onTripwire: (secret: SecretKind) => void;
 }
 
-/** The tool arguments are ignored on purpose: our own transcript is the source of truth. */
+/** The arguments are checked in plain code against our own transcript (livepay.ts); they never open anything alone. */
 export async function handleToolCall(call: { name: string; args?: unknown }, d: ToolDeps): Promise<ToolOutcome> {
   if (call.name !== "propose_payment") return { kind: "response", response: { shown: false, reason: "unknown_tool" } };
   const said = d.latestInput();
-  if (!said) return { kind: "response", response: { shown: false, reason: "no_transcript" } };
   const trip = spokenSecret(said);
   if (trip.tripped) {
     d.onTripwire(trip.kind ?? "pin");
     return { kind: "tripwire", secret: trip.kind ?? "pin" };
   }
-  let r: Understood;
+  const v = decideLivePayment(call.args, said, d.contacts, d.limitMinor());
+  if (!v.ok) return { kind: "response", response: { shown: false, reason: v.reason, ...(v.names ? { names: v.names } : {}) } };
+  const r: ProposalResult = { kind: "proposal", proposal: v.proposal, needsApproval: true, source: "rules" };
   try {
-    r = await d.understand(said);
+    const ok = await d.present(r, said);
+    return { kind: "response", response: ok ? { shown: true } : { shown: false, reason: "not_ready" } };
   } catch {
     return { kind: "response", response: { shown: false, reason: "failed" } };
   }
-  if (r.kind === "secret_spoken") {
-    d.onTripwire(r.secret);
-    return { kind: "tripwire", secret: r.secret };
-  }
-  if (r.kind === "proposal") {
-    const ok = await d.present(r, said).catch(() => false);
-    return { kind: "response", response: ok ? { shown: true } : { shown: false, reason: "not_ready" } };
-  }
-  return { kind: "response", response: { shown: false, reason: r.kind === "rejected" ? r.reason : "unclear" } };
 }
 
 // ---- the session loop -----------------------------------------------------------------------------
@@ -150,8 +140,15 @@ export interface LiveSessionLike {
 
 export type LiveEnd = "ended" | "tripwire" | "error";
 export interface LiveDeps {
-  understand: ToolDeps["understand"];
+  contacts: Contact[];
+  limitMinor: () => string;
   present: ToolDeps["present"];
+  /** Fallback only: the existing understand() path, used when the model promised details but never called the tool. */
+  understand?: (said: string) => Promise<Understood>;
+  /** Every tool call, answered: for the audit event (shown, reason) and the ?debug=1 panel (raw, memory only). */
+  onTool?: (e: { shown: boolean; reason: string; call: { name: string; args?: unknown }; response: ToolResponse }) => void;
+  /** A finished turn: who spoke and how many characters. Counts only. */
+  onTurnDone?: (who: "person" | "assistant", chars: number) => void;
   onTurns: (turns: LiveTurn[]) => void;
   onTripwire: (secret: SecretKind) => void;
   /** Base64 16-bit PCM at 24 kHz from the model. Not called while output is muted. */
@@ -188,6 +185,8 @@ export function runLive(session: LiveSessionLike, d: LiveDeps, opts: { startMute
   let turns: LiveTurn[] = [];
   let ended = false;
   let muted = Boolean(opts.startMuted);
+  let counted = 0;
+  let toolSeen = false; // a tool call came in during the current turn
   const gate = createMicGate<string>((b64) => void session.sendAudioRealtime({ mimeType: "audio/pcm;rate=16000", data: b64 }).catch(() => undefined));
 
   const finish = async (how: LiveEnd, code?: string, detail?: { reason: string; closeCode?: number }) => {
@@ -208,6 +207,28 @@ export function runLive(session: LiveSessionLike, d: LiveDeps, opts: { startMute
     await finish("tripwire", "tripwire");
   };
 
+  /** At the end of a turn: if the model promised to show details but called no tool, run the person's words through understand() ourselves. */
+  async function fallback() {
+    const sawTool = toolSeen;
+    toolSeen = false;
+    if (sawTool || ended || muted || !d.understand) return;
+    const reply = [...turns].reverse().find((t) => t.who === "app")?.text ?? "";
+    const said = currentInput(turns);
+    if (!said || !promisesDetails(reply) || spokenSecret(said).tripped) return;
+    try {
+      const r = await d.understand(said);
+      if (r.kind !== "proposal") return;
+      const ok = await d.present(r, said);
+      if (ok) {
+        gate.pause();
+        muted = true;
+      }
+      d.onTool?.({ shown: ok, reason: ok ? "fallback" : "not_ready", call: { name: "fallback" }, response: { shown: ok } });
+    } catch {
+      /* the normal flow stays available */
+    }
+  }
+
   async function onMessage(m: Msg) {
     if (m.type === "serverContent") {
       const c = m as Extract<Msg, { type: "serverContent" }>;
@@ -220,23 +241,36 @@ export function runLive(session: LiveSessionLike, d: LiveDeps, opts: { startMute
       if (c.interrupted) d.onInterrupted?.();
       turns = applyServerContent(turns, heard);
       d.onTurns(turns);
+      while (counted < turns.length && turns[counted].final) {
+        d.onTurnDone?.(turns[counted].who === "you" ? "person" : "assistant", turns[counted].text.length);
+        counted++;
+      }
+      if (c.turnComplete) await fallback();
       if (!muted) for (const p of c.modelTurn?.parts ?? []) if (p.inlineData?.data && (p.inlineData.mimeType ?? "").startsWith("audio/")) d.onAudioOut(p.inlineData.data);
     } else if (m.type === "toolCall") {
+      toolSeen = true;
       for (const call of (m as Extract<Msg, { type: "toolCall" }>).functionCalls) {
-        const out = await handleToolCall(call, {
-          latestInput: () => currentInput(turns),
-          understand: d.understand,
-          present: async (r, said) => {
-            const ok = await d.present(r, said);
-            if (ok) {
-              gate.pause(); // no audio goes to Live while the card is open
-              muted = true; // and its voice stays silent: our own read-back is the only thing spoken
-            }
-            return ok;
-          },
-          onTripwire: (s) => void trip(s),
-        });
+        let out: ToolOutcome;
+        try {
+          out = await handleToolCall(call, {
+            latestInput: () => currentInput(turns),
+            contacts: d.contacts,
+            limitMinor: d.limitMinor,
+            present: async (r, said) => {
+              const ok = await d.present(r, said);
+              if (ok) {
+                gate.pause(); // no audio goes to Live while the card is open
+                muted = true; // and its voice stays silent: our own read-back is the only thing spoken
+              }
+              return ok;
+            },
+            onTripwire: (s) => void trip(s),
+          });
+        } catch {
+          out = { kind: "response", response: { shown: false, reason: "failed" } };
+        }
         if (out.kind === "tripwire" || ended) return; // nothing further is sent
+        d.onTool?.({ shown: out.response.shown, reason: out.response.shown ? "ok" : (out.response.reason ?? "failed"), call, response: out.response });
         await session.sendFunctionResponses([{ ...(call.id ? { id: call.id } : {}), name: call.name, response: out.response }]);
       }
     }

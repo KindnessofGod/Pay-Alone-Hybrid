@@ -181,6 +181,9 @@ describe("full step log: every client event, only its own checked fields", () =>
     expect(v({ event: "history_load", count: 3, ms: 400 })).toEqual({ event: "history_load", fields: { outcome: "ok", count: 3, ms: 400 } });
     expect(v({ event: "read_receipt" })).toEqual({ event: "read_receipt", fields: { outcome: "ok" } });
     expect(v({ event: "live_tool", shown: true, reason: "approve_card" })).toEqual({ event: "live_tool", fields: { outcome: "ok", shown: true, reason: "approve_card" } });
+    expect(v({ event: "live_turn", who: "person", chars: 24, text: "send 5000 to Tunde" })).toEqual({ event: "live_turn", fields: { outcome: "ok", who: "person", chars: 24 } });
+    expect(v({ event: "live_turn", who: "Tunde", chars: 2 })).toBeNull();
+    expect(v({ event: "live_tool", shown: false, reason: "amount_not_heard" })).toEqual({ event: "live_tool", fields: { outcome: "ok", shown: false, reason: "amount_not_heard" } });
     expect(v({ event: "client_error", where: "understand", code: "failed" })).toEqual({ event: "client_error", fields: { outcome: "fail", where: "understand", code: "failed" } });
   });
 

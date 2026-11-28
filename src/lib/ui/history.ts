@@ -60,3 +60,24 @@ export function debugLine(e: EventView, locale?: string): string {
   const parts = DEBUG_KEYS.filter((k) => e[k] !== undefined).map((k) => `${k}=${String(e[k])}`);
   return [head, e.event, e.outcome, ...parts].filter(Boolean).join(" ");
 }
+
+export interface DebugRow {
+  time: string;
+  event: string;
+  status: string;
+  reason: string;
+  /** Everything on one line, so a row is never empty. */
+  text: string;
+}
+
+/** One saved step as separate visible parts: time, event name, ok or error, reason. Tolerates odd rows. */
+export function debugRow(e: EventView, locale?: string): DebugRow {
+  const ev = typeof e.event === "string" && e.event ? e.event : "unknown_event";
+  let time = "time unknown";
+  if (typeof e.t === "number") time = `t=${e.t}`;
+  else if (typeof e.at === "string" && !Number.isNaN(new Date(e.at).getTime())) time = when(e.at, locale);
+  const o = typeof e.outcome === "string" ? e.outcome : "";
+  const status = !o ? "" : o === "ok" || o === "paid" || o === "connected" ? "ok" : "error" === o || o === "fail" || o === "failed" || o === "refused" || o === "unreachable" ? "error" : o;
+  const reason = typeof e.reason === "string" ? e.reason.replace(/_/g, " ") : "";
+  return { time, event: ev, status, reason, text: [time, ev, status, reason && `(${reason})`].filter(Boolean).join(" ") };
+}
