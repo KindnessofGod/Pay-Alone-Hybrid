@@ -3,7 +3,7 @@
 import type { ReactNode, Ref } from "react";
 import { aiPill, sourceChip } from "@/lib/ui/status";
 
-export function FingerprintIcon({ color = "#1A1400" }: { color?: string }) {
+export function FingerprintIcon({ color = "#ffffff" }: { color?: string }) {
   return (
     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" aria-hidden="true">
       <path d="M12 11v3M8 9a4 4 0 0 1 8 0v4M5 12V9a7 7 0 0 1 14 0v3M9 16c.5 2 1.5 3.5 3 5M15 15c0 2-.5 4-1.5 5.5" />
@@ -16,8 +16,10 @@ export function Header({ nano }: { nano: string }) {
   return (
     <header>
       <div className="logo">
-        <div className="mark" aria-hidden="true">₦</div>
-        <h1>Pay Alone</h1>
+        <div className="mark" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3" /></svg>
+        </div>
+        <h1>Pay alone.</h1>
       </div>
       <div className={`pill tone-${p.tone}`} role="status">
         <span className="dot" aria-hidden="true" />
@@ -30,8 +32,8 @@ export function Header({ nano }: { nano: string }) {
 export function WalletCard({ note, connected, children }: { note?: string; connected?: boolean; children?: ReactNode }) {
   return (
     <section className="wallet" aria-label="Wallet">
-      <small>{connected ? "Test wallet connected" : "Test wallet"}</small>
-      <b>Weekly limit set on your wallet&apos;s consent page</b>
+      <small>{connected ? <><span aria-hidden="true">✓</span> Test wallet connected</> : "Test wallet · test money only"}</small>
+      <b>Weekly limit is set on your wallet</b>
       {note && <p>{note}</p>}
       {children}
     </section>
@@ -164,7 +166,7 @@ export function Dock({
   return (
     <div className="dock">
       <button type="button" className="mic" aria-pressed={listening} aria-label={micLabel} onClick={onMic}>
-        <svg viewBox="0 0 24 24" fill="none" stroke="#1A1400" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#c3e88f" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
           <rect x="9" y="3" width="6" height="11" rx="3" />
           <path d="M5 11a7 7 0 0 0 14 0M12 18v3" />
         </svg>
@@ -181,7 +183,7 @@ export function Dock({
           </button>
         ))}
       </div>
-      <p className="sim-line">Test money only. Test contacts are simulated.</p>
+      <p className="sim-line">Test money only</p>
     </div>
   );
 }
