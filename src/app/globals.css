@@ -237,3 +237,4 @@ code{background:var(--bg);border:1px solid var(--line);padding:2px 6px;border-ra
 .pausedtag{font-weight:700;color:var(--wait);background:var(--wait-soft);border-radius:999px;padding:4px 12px;display:inline-block}
 @media (prefers-reduced-motion:no-preference){.fpicon{animation:fppulse 2s ease-in-out infinite}}
 @keyframes fppulse{50%{box-shadow:0 0 0 14px rgba(14,122,85,.12)}}
+.startlayer.inline{position:relative;inset:auto;min-height:620px;border-radius:24px;z-index:0}

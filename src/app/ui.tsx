@@ -319,9 +319,9 @@ export function LanguagePicker({ value, onChange, id = "lang", className = "" }:
  * The first thing on screen. Browsers allow sound and the microphone only after a key press or tap, so this whole
  * layer is one big button: any key, click or touch starts the app, and the voice then speaks first.
  */
-export function StartLayer({ lang, onLang, onStart, busy = false }: { lang: LangCode; onLang?: (c: LangCode) => void; onStart?: () => void; busy?: boolean }) {
+export function StartLayer({ lang, onLang, onStart, busy = false, inline = false }: { lang: LangCode; onLang?: (c: LangCode) => void; onStart?: () => void; busy?: boolean; inline?: boolean }) {
   return (
-    <div className="startlayer" role="button" tabIndex={0} autoFocus aria-label="Pay Alone. Press any key or tap anywhere to start. Pay Alone will then speak to you." onClick={() => onStart?.()} aria-busy={busy}>
+    <div className={`startlayer${inline ? " inline" : ""}`} role="button" tabIndex={0} autoFocus={!inline} aria-label="Pay Alone. Press any key or tap anywhere to start. Pay Alone will then speak to you." onClick={() => onStart?.()} aria-busy={busy}>
       <div className="startinner">
         <div className="mark big" aria-hidden="true">
           <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3" /></svg>

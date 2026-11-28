@@ -2,7 +2,7 @@
 // Screenshot-only page with FIXED SAMPLE DATA. It never calls the wallet, Firebase or an AI.
 // It does not exist in production builds.
 import { notFound } from "next/navigation";
-import { Bubble, Chip, Dock, FingerprintIcon, Header, ListeningBubble, PayCard, PayCodeView, PinStopped, PrivacyCard, ReceiptCard, ReceiptRow, RequestCard, SpeechConsent, WalletCard } from "../ui";
+import { Bubble, Chip, Dock, FingerprintIcon, FingerprintWait, Header, LanguagePicker, ListeningBubble, SetupView, StartLayer, PayCard, PayCodeView, PinStopped, PrivacyCard, ReceiptCard, ReceiptRow, RequestCard, SpeechConsent, WalletCard } from "../ui";
 import { ShopForm, ShopShell, ShopStatus } from "../shop/ShopView";
 import { shopStatusView } from "@/lib/ui/requestprompt";
 
@@ -93,6 +93,57 @@ export default function DesignPreview() {
   return (
     <>
       <div className="banner" role="note">Design preview, sample data</div>
+      <p className="preview-h" id="vf-1">VF1. Voice-first: the start layer (any key or tap)</p>
+      <section aria-label="Start layer" id="vf-start" style={{ maxWidth: 1100, margin: "0 auto 40px" }}><StartLayer inline lang="en" /></section>
+
+      <p className="preview-h" id="vf-2">VF2. Language picker (top of the screen)</p>
+      <section aria-label="Language bar" id="vf-lang" style={{ maxWidth: 480, margin: "0 auto 40px", border: "1px solid var(--line)", borderRadius: 24, overflow: "hidden" }}>
+        <div className="app" style={{ minHeight: 0 }}>
+          <Header nano="available" />
+          <div className="langbar"><LanguagePicker id="lang-prev" value="fr" /></div>
+          <div className="panel-body">
+            <ol className="chat" aria-label="Conversation">
+              <Bubble who="app" chip={<Chip source="cloud" />}>Bonjour, bienvenue sur Pay Alone. Que souhaitez-vous faire aujourd&apos;hui ?</Bubble>
+            </ol>
+          </div>
+          <Dock hint="Listening. Press Space to pause" listening micLabel="Microphone is on. Press to pause, or press Space" typed="" tab="talk" />
+        </div>
+      </section>
+
+      <p className="preview-h" id="vf-3">VF3. First-run setup by voice: PIN, confirm, fingerprint, done</p>
+      <section aria-label="Setup steps" id="vf-setup" style={{ maxWidth: 480, margin: "0 auto 40px", display: "flex", flexDirection: "column", gap: 16 }}>
+        <SetupView step="pin" pin="48" count="2 digits" message="Before your first payment, let's set up. Type a 4 digit PIN you will remember, then press Enter." />
+        <SetupView step="confirm" pin="" count="" message="Type it again to confirm." />
+        <SetupView step="passkey" pin="" count="" message="Now let's add your fingerprint or Windows Hello, so you can approve without typing. Say skip to do this later." />
+        <SetupView step="done" pin="" count="" message="You're set. Your weekly limit is set on your wallet's own page when you connect it." />
+      </section>
+
+      <p className="preview-h" id="vf-4">VF4. Approving by fingerprint, spoken and automatic</p>
+      <section aria-label="Approve with fingerprint" id="vf-approve" style={{ maxWidth: 480, margin: "0 auto 40px", display: "flex", flexDirection: "column", gap: 16 }}>
+        <PayCard>
+          <p className="amt">₦3,000.00</p>
+          <p className="to">to Tunde</p>
+          <div className="meta"><span>Fees included</span><span>From the wallet&apos;s quote</span></div>
+          <FingerprintWait title="Use your fingerprint or Windows Hello now" hint="Say cancel, or press Esc, to stop. Nothing is sent until you approve." />
+        </PayCard>
+        <PayCard>
+          <p className="amt">₦3,000.00</p>
+          <p className="to">to Tunde</p>
+          <FingerprintWait title="Press any key to approve with your fingerprint" hint="The browser needs one key press first." />
+        </PayCard>
+        <PayCard>
+          <p className="amt">₦3,000.00</p>
+          <p className="to">to Tunde</p>
+          <p className="msg">Type your 4 digit PIN on the keypad, then press Enter. I will not listen while you type.</p>
+          <div className="stack">
+            <label className="pinlabel" htmlFor="pin-prev">Type your PIN to approve</label>
+            <input id="pin-prev" className="pin" type="password" defaultValue="482" readOnly />
+            <p className="note">3 digits typed</p>
+            <button type="button" className="btn primary">Approve with PIN</button>
+          </div>
+        </PayCard>
+      </section>
+
       <p className="preview-h">Wide layout (1024px and up). Open this page in a wide window to judge it.</p>
       <p className="preview-h" id="desk-1">D1. Wide: start screen</p>
       <Desk title="Wide start screen" nano="available" empty hint="Tap to start talking" connected={false} side={<><EmptyReceipts /><PrivacyCard facts={FACTS} /></>} />
