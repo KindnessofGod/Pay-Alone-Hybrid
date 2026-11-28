@@ -2,7 +2,8 @@
 export type Tone = "ok" | "wait" | "cloud" | "rules";
 
 /** The header pill, from the Nano state the app already tracks. Unknown states never claim on-device. */
-export function aiPill(nano: string): { label: string; tone: Tone } {
+export function aiPill(nano: string, liveVoice = false): { label: string; tone: Tone } {
+  if (liveVoice) return { label: "Voice online (Gemini Live) · money checked on this device", tone: "cloud" };
   if (nano === "available") return { label: "AI on this device", tone: "ok" };
   if (nano === "checking" || nano === "preparing" || nano === "warming up" || nano === "downloadable" || nano.startsWith("downloading"))
     return { label: "AI getting ready…", tone: "wait" };

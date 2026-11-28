@@ -983,7 +983,7 @@ export default function Home() {
       <>
       {startEl}
       <div className="app desk" inert={!begun}>
-        <Header nano={nano} right={walletEl(true)} />
+        <Header nano={nano} liveVoice={liveUsable} right={walletEl(true)} />
         {langEl}
         <div className="grid">
           <section className={`convo${quiet ? " empty" : ""}`} aria-label="Conversation">
@@ -1018,7 +1018,7 @@ export default function Home() {
     <>
     {startEl}
     <div className="app" inert={!begun}>
-      <Header nano={nano} />
+      <Header nano={nano} liveVoice={liveUsable} />
       {langEl}
       <div className="panel-body" role="tabpanel" id="panel-talk" aria-labelledby="tab-talk" hidden={tab !== "talk"}>
         {walletEl(false)}

@@ -14,8 +14,8 @@ export function FingerprintIcon({ color = "#ffffff" }: { color?: string }) {
   );
 }
 
-export function Header({ nano, right }: { nano: string; right?: ReactNode }) {
-  const p = aiPill(nano);
+export function Header({ nano, right, liveVoice = false }: { nano: string; right?: ReactNode; liveVoice?: boolean }) {
+  const p = aiPill(nano, liveVoice);
   return (
     <header>
       <div className="logo">

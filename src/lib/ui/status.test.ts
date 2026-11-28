@@ -30,3 +30,11 @@ describe("sourceChip", () => {
     expect(sourceChip("rules")).toMatchObject({ icon: "⚡", tone: "rules" });
   });
 });
+
+describe("aiPill while Gemini Live is the voice", () => {
+  it("says the voice is online with Google, never 'on this device' or 'hidden'", () => {
+    expect(aiPill("available", true)).toEqual({ label: "Voice online (Gemini Live) · money checked on this device", tone: "cloud" });
+    expect(aiPill("unavailable", true).label).not.toMatch(/hidden/);
+  });
+});
+
