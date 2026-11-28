@@ -6,7 +6,7 @@ import { understand, type Policy, type Understood } from "@/lib/hybrid/understan
 import type { Contact } from "@/lib/hybrid/crosscheck";
 import { nanoAvailability } from "@/lib/hybrid/device";
 import { installLocalSpeech, listenOnce, localSpeechStatus, say, stopListening } from "@/lib/hybrid/listen";
-import { firebaseApp, firebaseConfigured, remoteSettings, reportEvent } from "@/lib/firebase/client";
+import { api, firebaseApp, firebaseConfigured, remoteSettings, reportEvent } from "@/lib/firebase/client";
 import { speechMode, type SpeechStatus } from "@/lib/hybrid/speechpolicy";
 import { chatEngines, firebaseEngines, lastCall, prepareOnDevice, warmUpOnDevice } from "@/lib/firebase/engines";
 import { DEMO_CONTACTS } from "@/lib/demo/contacts";
@@ -113,11 +113,11 @@ export default function Home() {
   }
 
   // Typing works before Start too: the Go press is the user gesture that starts Gemini Nano.
-  async function submitTyped() {
-    if (!typed) return;
+  async function submitTyped(override?: string) {
+    const text = override ?? typed;
+    if (!text) return;
     stopListening(); // typing wins over a microphone that is still open
     lastInput.current = "typed";
-    const text = typed;
     setTyped("");
     try {
       const s = ready ? undefined : await start(false);
@@ -286,10 +286,25 @@ export default function Home() {
     return () => window.removeEventListener("keydown", onKey);
   }, [ready, talk, approving]);
 
+  // The same wallet connection the approval card offers: the wallet's own page sets the weekly limit.
+  async function connectWallet() {
+    try {
+      const r = await api<{ redirectUrl: string }>("/api/wallet/connect", {});
+      if (r.ok && r.redirectUrl) {
+        window.location.href = r.redirectUrl;
+        return;
+      }
+    } catch {
+      /* falls through to the message */
+    }
+    setWalletNote("I could not reach your wallet. Nothing was changed. Please try again.");
+  }
+  const EXAMPLES = ["Send 500 naira to Tunde", "What can you do?", "How do you keep my PIN safe?"];
+
   const speechWords = speech === "local" ? "on this computer" : speech === "server" ? "Google servers" : speech;
   const voiceWords = voice === "ready" ? "natural (on this computer)" : voice === "loading" ? "loading, browser voice meanwhile" : "browser";
-  const hint = !ready ? "Tap to start" : listening ? "Listening…" : approving ? "Approve on the card, or say \"no\" to cancel" : "Tap and speak";
-  const micLabel = !ready ? "Tap to start" : listening ? "Listening. Press to stop" : "Press to speak (or Space)";
+  const hint = !ready ? "Tap to start talking" : listening ? "Listening…" : approving ? "Approve on the card, or say \"no\" to cancel" : "Tap and speak";
+  const micLabel = !ready ? "Tap to start talking" : listening ? "Listening. Press to stop" : "Press to speak (or Space)";
   const onMic = () => {
     if (!ready) void start().catch(() => setWorking("Something went wrong while starting. Please reload the page."));
     else void talk();
@@ -318,7 +333,7 @@ export default function Home() {
     <div className="app">
       <Header nano={nano} />
       <div className="panel-body" role="tabpanel" id="panel-talk" aria-labelledby="tab-talk" hidden={tab !== "talk"}>
-        <WalletCard note={walletNote} connected={walletConnected}>
+        <WalletCard note={walletNote} connected={walletConnected} onConnect={firebaseConfigured() ? () => void connectWallet() : undefined}>
           {resume && !approving && (
             <button
               type="button"
@@ -333,6 +348,21 @@ export default function Home() {
             </button>
           )}
         </WalletCard>
+        {turns.length === 0 && !approving && (
+          <section className="welcome" aria-label="Welcome">
+            <p className="serif big">Say who you want to pay.</p>
+            <p className="note">Or ask me anything.</p>
+            <ul className="examples" aria-label="Try one of these">
+              {EXAMPLES.map((ex) => (
+                <li key={ex}>
+                  <button type="button" className="example" onClick={() => void submitTyped(ex)}>
+                    {ex}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
         <div aria-live="polite" className="chat">
           {working && <p className="working">{working}</p>}
           {turns.length > 0 && (

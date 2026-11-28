@@ -6,7 +6,8 @@ import { api } from "@/lib/firebase/client";
 import { yesNo } from "@/lib/hybrid/confirm";
 import { spokenSecret } from "@/lib/hybrid/tripwire";
 import { FINGERPRINT_FAILED, FINGERPRINT_OFFER, FINGERPRINT_PROMPT, fingerprintAvailable, fingerprintRequest } from "@/lib/ui/fingerprint";
-import { formatAmount } from "@/lib/money";
+import { formatAmount, nairaOf, type Amount } from "@/lib/money";
+import { bigAmount, isAmountView } from "@/lib/ui/amountview";
 import { approvalMessage } from "@/lib/ui/messages";
 import { pinAnnouncement, pinPress } from "@/lib/ui/pinpad";
 import { saveResume } from "@/lib/ui/resume";
@@ -48,6 +49,7 @@ export default function Approve({ payeeId, amountMinor, speak, listen, onClose, 
   const [message, setMessage] = useState("");
   const [receipt, setReceipt] = useState<Receipt | null>(null);
   const [hasPasskey, setHasPasskey] = useState(false);
+  const [quote, setQuote] = useState<{ debit: Amount; payeeName: string; readBack: string } | null>(null); // straight from the server quote
   const [showPin, setShowPin] = useState(false); // with a fingerprint on file the PIN pad opens on request
   const [approvedBy, setApprovedBy] = useState<"PIN" | "fingerprint">("PIN");
   const [spokenReceipt, setSpokenReceipt] = useState("");
@@ -70,9 +72,10 @@ export default function Approve({ payeeId, amountMinor, speak, listen, onClose, 
   };
 
   async function begin() {
-    const r = await call<{ requestId: string; challenge: string; readBack: string; hasPasskey?: boolean }>("/api/pay/start", { payeeId, amountMinor });
+    const r = await call<{ requestId: string; challenge: string; readBack: string; hasPasskey?: boolean; debit?: unknown; payeeName?: unknown }>("/api/pay/start", { payeeId, amountMinor });
     if (r.ok) {
       req.current = { requestId: r.requestId, challenge: r.challenge };
+      if (isAmountView(r.debit) && typeof r.payeeName === "string") setQuote({ debit: r.debit, payeeName: r.payeeName, readBack: r.readBack });
       setPhase("pin");
       const fp = Boolean(r.hasPasskey) && fingerprintAvailable();
       setHasPasskey(Boolean(r.hasPasskey));
@@ -292,7 +295,18 @@ export default function Approve({ payeeId, amountMinor, speak, listen, onClose, 
 
   return (
     <PayCard label={paymentPhase ? "Please check this payment" : "Pay Alone"}>
-      <p className="msg" aria-live="polite">{message}</p>
+      {quote && paymentPhase && (
+        <>
+          <p className="amt">{bigAmount(quote.debit)}</p>
+          {nairaOf(quote.debit) && <p className="note">about ₦{nairaOf(quote.debit)}</p>}
+          <p className="to">to {quote.payeeName}</p>
+          <div className="meta">
+            <span>Fees included</span>
+            <span>From the wallet&apos;s quote</span>
+          </div>
+        </>
+      )}
+      <p className={quote && paymentPhase && message === quote.readBack ? "vh" : "msg"} aria-live="polite">{message}</p>
       <div className="stack">
         {fingerprintReady && (
           <button type="button" className="btn primary" onClick={() => void approveWithFingerprint()}>

@@ -38,6 +38,14 @@ describe("payment flow on the server", () => {
     expect(typeof r.challenge).toBe("string");
   });
 
+  it("start: returns the quote's debit amount and the payee name for the approval card, never the requested amount", async () => {
+    const d = await ready();
+    const r = await startPayment(d, "u1", { payeeId: "c2", amountMinor: "500000" });
+    if (!r.ok) throw new Error("start failed");
+    expect(r.debit).toEqual({ value: "502000", assetCode: "NGN", assetScale: 2 }); // quote, fees included
+    expect(r.payeeName).toBe("Tunde");
+  });
+
   it("start: refuses an unknown payee, a bad amount, or one over the voice limit", async () => {
     const d = await ready();
     expect(await startPayment(d, "u1", { payeeId: "zz", amountMinor: "500" })).toMatchObject({ ok: false, reason: "unknown_payee" });

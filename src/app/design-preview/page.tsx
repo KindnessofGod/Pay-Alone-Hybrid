@@ -22,10 +22,18 @@ export default function DesignPreview() {
     <>
       <div className="banner" role="note">Design preview, sample data</div>
       <p className="preview-h">1. Start screen</p>
-      <Frame title="Start screen" nano="checking" hint="Tap to start">
+      <Frame title="Start screen" nano="checking" hint="Tap to start talking">
         <div className="panel-body">
-          <WalletCard />
-          <ol className="chat" aria-label="Conversation" />
+          <WalletCard onConnect={() => undefined} />
+          <section className="welcome" aria-label="Welcome">
+            <p className="serif big">Say who you want to pay.</p>
+            <p className="note">Or ask me anything.</p>
+            <ul className="examples" aria-label="Try one of these">
+              {["Send 500 naira to Tunde", "What can you do?", "How do you keep my PIN safe?"].map((ex) => (
+                <li key={ex}><button type="button" className="example">{ex}</button></li>
+              ))}
+            </ul>
+          </section>
         </div>
       </Frame>
 
@@ -40,7 +48,7 @@ export default function DesignPreview() {
           <PayCard>
             <p className="amt">₦500.00</p>
             <p className="to">to Tunde</p>
-            <div className="meta"><span>Fee ₦0.00</span><span>From the wallet&apos;s quote</span></div>
+            <div className="meta"><span>Fees included</span><span>From the wallet&apos;s quote</span></div>
             <div className="stack">
               <button type="button" className="btn primary"><FingerprintIcon /> Approve with fingerprint</button>
               <button type="button" className="btn ghost">Use my PIN instead</button>

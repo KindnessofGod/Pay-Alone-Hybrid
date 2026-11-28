@@ -24,10 +24,17 @@ code{background:var(--bg);border:1px solid var(--line);padding:2px 6px;border-ra
 .tone-rules{background:var(--lime-soft);color:#33480b}
 
 .panel-body{flex:1;padding:4px 16px 16px;display:flex;flex-direction:column;gap:12px}
-.wallet{background:var(--paper);border:1px solid var(--line);border-radius:18px;padding:12px 16px;box-shadow:var(--shadow);display:flex;flex-direction:column;gap:4px}
-.wallet small{color:var(--ink-2);font-size:14px;font-weight:600;display:flex;gap:6px;align-items:center}
-.wallet b{font-size:17px;font-weight:700}
-.wallet p{color:var(--ink-2);font-size:15px}
+.wallet{background:var(--paper);border:1px solid var(--line);border-radius:14px;padding:8px 14px;display:flex;flex-direction:column;gap:0}
+.wallet small{color:var(--ink-2);font-size:13px}
+.wallet b{font-size:15px;font-weight:700;color:var(--brand-strong)}
+.wallet p{color:var(--ink-2);font-size:14px}
+.walletbtn{min-height:48px;margin:-4px -6px;padding:0 6px;font-size:16px;font-weight:700;color:var(--brand-strong);text-align:left;border-radius:10px}
+.welcome{display:flex;flex-direction:column;gap:6px;padding:28px 4px 8px}
+.welcome .big{font-size:44px;line-height:1.05;letter-spacing:-.03em}
+.welcome .note{font-size:18px}
+.examples{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px}
+.example{min-height:48px;padding:10px 16px;border-radius:999px;background:var(--paper);border:1px solid var(--line);box-shadow:var(--shadow);font-size:16px;font-weight:600;color:var(--brand-strong);text-align:left}
+.example:hover{background:var(--lime-soft)}
 .btn{width:100%;min-height:56px;border-radius:16px;padding:14px 17px;font-weight:700;font-size:19px;display:flex;justify-content:center;gap:10px;align-items:center;text-align:center;transition:filter .15s ease}
 .btn:hover:not(:disabled){filter:brightness(1.06)}
 .primary{background:var(--brand);color:#fff}

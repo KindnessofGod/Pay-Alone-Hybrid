@@ -29,11 +29,21 @@ export function Header({ nano }: { nano: string }) {
   );
 }
 
-export function WalletCard({ note, connected, children }: { note?: string; connected?: boolean; children?: ReactNode }) {
+export function WalletCard({ note, connected, onConnect, children }: { note?: string; connected?: boolean; onConnect?: () => void; children?: ReactNode }) {
   return (
     <section className="wallet" aria-label="Wallet">
-      <small>{connected ? <><span aria-hidden="true">✓</span> Test wallet connected</> : "Test wallet · test money only"}</small>
-      <b>Weekly limit is set on your wallet</b>
+      {connected ? (
+        <>
+          <b><span aria-hidden="true">✓</span> Test wallet connected</b>
+          <small>Your weekly limit protects you</small>
+        </>
+      ) : onConnect ? (
+        <button type="button" className="walletbtn" onClick={onConnect}>
+          Connect your test wallet
+        </button>
+      ) : (
+        <b>Test wallet</b>
+      )}
       {note && <p>{note}</p>}
       {children}
     </section>
@@ -173,7 +183,7 @@ export function Dock({
       </button>
       <p className="hint" aria-live="polite">{hint}</p>
       <div className="type">
-        <input ref={inputRef} aria-label="Or type what you want to do" placeholder="Or type: send 5000 naira to Mama Ade" value={typed} onChange={(e) => onTyped?.(e.target.value)} onKeyDown={(e) => e.key === "Enter" && onSubmit?.()} />
+        <input ref={inputRef} aria-label="Or type what you want to do" placeholder="Or type here" value={typed} onChange={(e) => onTyped?.(e.target.value)} onKeyDown={(e) => e.key === "Enter" && onSubmit?.()} />
         <button type="button" onClick={() => onSubmit?.()}>Go</button>
       </div>
       <div className="tabs" role="tablist" aria-label="Sections">
